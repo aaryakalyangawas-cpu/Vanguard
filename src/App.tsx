@@ -52,19 +52,26 @@ export default function App() {
 
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [showScoreboard, setShowScoreboard] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
 
   // Mount Three.js WebGL Engine once in isolated ref container
   useEffect(() => {
     const container = canvasMountRef.current;
     if (!container) return;
 
-    const engine = new FpsEngine(container, configRef.current, (snapshot) => {
-      setHud(snapshot);
-    });
-    engineRef.current = engine;
+    let engine: FpsEngine | null = null;
+    try {
+      engine = new FpsEngine(container, configRef.current, (snapshot) => {
+        setHud(snapshot);
+      });
+      engineRef.current = engine;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to initialize 3D WebGL renderer.';
+      setInitError(msg);
+    }
 
     return () => {
-      engine.dispose();
+      engine?.dispose();
       engineRef.current = null;
     };
   }, []);
@@ -133,6 +140,17 @@ export default function App() {
     <div className="relative w-screen h-screen overflow-hidden bg-[#0a0d12]">
       {/* Dedicated isolated WebGL canvas mount */}
       <div ref={canvasMountRef} className="absolute inset-0 w-full h-full" />
+
+      {initError && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center p-6 bg-[#070a10]/90">
+          <div className="max-w-md rounded-xl bg-[#0d121c] border border-red-500/40 p-6 text-slate-200 shadow-2xl">
+            <h2 className="font-display text-lg font-bold text-white mb-2">
+              3D Renderer Initialization Failed
+            </h2>
+            <p className="text-xs text-slate-400 leading-relaxed">{initError}</p>
+          </div>
+        </div>
+      )}
 
       {hud && hud.phase === 'playing' && (
         <TacticalHud

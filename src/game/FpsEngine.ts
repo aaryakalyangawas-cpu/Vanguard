@@ -682,7 +682,14 @@ export class FpsEngine {
   public requestPointerLock() {
     if (this.disposed) return;
     try {
-      this.renderer.domElement.requestPointerLock?.();
+      const result = this.renderer.domElement.requestPointerLock?.() as unknown as
+        | Promise<void>
+        | undefined;
+      if (result && typeof result.catch === 'function') {
+        result.catch(() => {
+          // Ignore pointer lock rejection in sandboxed iframes
+        });
+      }
     } catch {
       // Ignore pointer lock rejection in headless/sandboxed environments
     }
@@ -813,7 +820,7 @@ export class FpsEngine {
 
   private handleMouseMove = (e: MouseEvent) => {
     if (this.phase !== 'playing' || !this.player.alive) return;
-    if (!this.pointerLocked && !this.mouseDownLeft) return;
+    if (!this.pointerLocked && !this.mouseDownLeft && !this.mouseDownRight) return;
 
     const fovRatio = this.camera.fov / 75;
     const sensScale =
@@ -851,11 +858,8 @@ export class FpsEngine {
 
   private handleMouseDown = (e: MouseEvent) => {
     if (this.phase !== 'playing') return;
-    if (!this.pointerLocked) {
-      if (e.target === this.renderer.domElement) {
-        this.requestPointerLock();
-      }
-      return;
+    if (!this.pointerLocked && e.target === this.renderer.domElement) {
+      this.requestPointerLock();
     }
     if (e.button === 0) {
       this.mouseDownLeft = true;

@@ -24,15 +24,15 @@ export const GameMenus: React.FC<GameMenusProps> = ({
 }) => {
   if (hud.phase === 'lobby') {
     return (
-      <div className="fixed inset-0 z-20 flex items-center justify-center p-6 bg-[#070a10]/62 overflow-y-auto">
-        <div className="w-full max-w-5xl rounded-xl bg-[#0d121c]/95 border border-slate-700/80 p-7 shadow-2xl">
+      <div className="fixed inset-0 z-20 flex items-start justify-center p-4 sm:p-5 bg-[#070a10]/62 overflow-y-auto">
+        <div className="my-auto w-full max-w-5xl rounded-xl bg-[#0d121c]/95 border border-slate-700/80 p-5 sm:p-6 shadow-2xl">
           {/* Header Row */}
-          <div className="flex flex-wrap items-center justify-between gap-4 pb-5 mb-6 border-b border-slate-800">
+          <div className="flex flex-wrap items-center justify-between gap-4 pb-4 mb-4 border-b border-slate-800">
             <div>
-              <h1 className="font-display text-3xl font-bold tracking-tight text-white">
+              <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-white">
                 Vanguard Arena
               </h1>
-              <p className="text-sm text-slate-400 mt-1">
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
                 Browser 3D Team Deathmatch · 3 Maps · 7 Weapons + RPG-7 · Fixed .50 Cal HMGs · Frag Grenades
               </p>
             </div>
@@ -40,7 +40,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
               <button
                 type="button"
                 onClick={() => onUpdateConfig({ muted: !config.muted })}
-                className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors whitespace-nowrap shrink-0"
+                className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 {config.muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                 {config.muted ? 'Audio Muted' : 'Audio On'}
@@ -48,7 +48,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
               <button
                 type="button"
                 onClick={onStartMatch}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition-colors whitespace-nowrap shrink-0 shadow-lg"
+                className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition-colors whitespace-nowrap shrink-0 shadow-lg cursor-pointer"
               >
                 <Play className="w-4 h-4 fill-current" />
                 Deploy to Match
@@ -57,7 +57,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
           </div>
 
           {/* Map Selection Strip */}
-          <div className="mb-6">
+          <div className="mb-4">
             <div className="flex items-baseline justify-between mb-2.5">
               <h2 className="font-display text-base font-semibold text-slate-100">
                 Select Combat Arena
@@ -73,20 +73,20 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                     key={mid}
                     type="button"
                     onClick={() => onUpdateConfig({ mapId: mid })}
-                    className={`text-left p-3.5 rounded-lg border transition-colors ${
+                    className={`text-left p-3 rounded-lg border transition-colors cursor-pointer ${
                       selected
                         ? 'bg-slate-800/95 border-amber-400 text-white'
                         : 'bg-[#121824] border-slate-800 hover:border-slate-600 text-slate-200'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center justify-between gap-2 mb-0.5">
                       <span className="font-display text-sm font-bold text-white flex items-center gap-1.5">
                         <MapPin className={`w-3.5 h-3.5 ${selected ? 'text-amber-400' : 'text-slate-400'}`} />
                         {m.name}
                       </span>
                       <span className="text-[11px] font-mono text-slate-400">{m.sizeLabel}</span>
                     </div>
-                    <div className="text-[11px] text-amber-300/90 mb-1">{m.environment}</div>
+                    <div className="text-[11px] text-amber-300/90 mb-0.5">{m.environment}</div>
                     <p className="text-xs text-slate-400 leading-snug">{m.description}</p>
                   </button>
                 );
@@ -94,17 +94,17 @@ export const GameMenus: React.FC<GameMenusProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-7">
-            {/* Left: Starting Weapon Arsenal (6 Realistic Weapons) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Left: Starting Weapon Arsenal (7 Weapons) */}
             <div className="lg:col-span-7">
-              <div className="flex items-baseline justify-between mb-3">
+              <div className="flex items-baseline justify-between mb-2.5">
                 <h2 className="font-display text-base font-semibold text-slate-100">
                   Select Starting Weapon
                 </h2>
                 <span className="text-xs text-slate-400">All 7 weapons available in-match (1–7)</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {WEAPON_ORDER.map((wid: WeaponId) => {
                   const w = WEAPONS[wid];
                   const selected = config.startingWeapon === wid;
@@ -116,7 +116,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                       key={wid}
                       type="button"
                       onClick={() => onUpdateConfig({ startingWeapon: wid })}
-                      className={`text-left p-3.5 rounded-lg border transition-colors ${
+                      className={`text-left p-2.5 rounded-lg border transition-colors cursor-pointer ${
                         selected
                           ? 'bg-slate-800/95 border-amber-400 text-white'
                           : 'bg-[#121824] border-slate-800 hover:border-slate-600 text-slate-200'
@@ -128,25 +128,25 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                         </span>
                         <span className="font-mono text-[11px] text-amber-400">Slot {w.slot}</span>
                       </div>
-                      <div className="text-[11px] text-slate-400 mb-2.5">
+                      <div className="text-[11px] text-slate-400 mb-1.5">
                         {w.caliber} · {w.fireMode} · {w.magSize} rd
                       </div>
 
-                      <div className="space-y-1 text-[11px] text-slate-400">
+                      <div className="space-y-1 text-[10px] text-slate-400">
                         <div className="flex items-center gap-2">
-                          <span className="w-14 shrink-0">Damage</span>
+                          <span className="w-12 shrink-0">Damage</span>
                           <div className="flex-1 h-1.5 bg-slate-900 rounded-sm overflow-hidden">
                             <div className="h-full bg-amber-400" style={{ width: `${dmgPct}%` }} />
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="w-14 shrink-0">Fire Rate</span>
+                          <span className="w-12 shrink-0">Fire Rate</span>
                           <div className="flex-1 h-1.5 bg-slate-900 rounded-sm overflow-hidden">
                             <div className="h-full bg-sky-400" style={{ width: `${rofPct}%` }} />
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="w-14 shrink-0">Range</span>
+                          <span className="w-12 shrink-0">Range</span>
                           <div className="flex-1 h-1.5 bg-slate-900 rounded-sm overflow-hidden">
                             <div className="h-full bg-emerald-400" style={{ width: `${rngPct}%` }} />
                           </div>
@@ -272,6 +272,15 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                   <span className="font-mono text-slate-300">E</span>
                 </div>
               </div>
+
+              <button
+                type="button"
+                onClick={onStartMatch}
+                className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition-colors shadow-lg cursor-pointer"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                Deploy to Match
+              </button>
             </div>
           </div>
         </div>
@@ -281,8 +290,8 @@ export const GameMenus: React.FC<GameMenusProps> = ({
 
   if (hud.phase === 'paused') {
     return (
-      <div className="fixed inset-0 z-20 flex flex-col items-center justify-center gap-6 p-6 bg-[#070a10]/78 overflow-y-auto">
-        <div className="w-full max-w-4xl rounded-xl bg-[#0d121c]/95 border border-slate-700/80 p-6 shadow-2xl">
+      <div className="fixed inset-0 z-20 flex items-start justify-center p-6 bg-[#070a10]/78 overflow-y-auto">
+        <div className="my-auto w-full max-w-4xl rounded-xl bg-[#0d121c]/95 border border-slate-700/80 p-6 shadow-2xl">
           <div className="flex flex-wrap items-center justify-between gap-4 pb-4 mb-5 border-b border-slate-800">
             <div>
               <h2 className="font-display text-2xl font-bold text-white">Match Paused</h2>
@@ -350,8 +359,8 @@ export const GameMenus: React.FC<GameMenusProps> = ({
     const victory = hud.winner === 'blue';
     const isDraw = hud.winner === 'draw';
     return (
-      <div className="fixed inset-0 z-20 flex items-center justify-center p-6 bg-[#070a10]/80 overflow-y-auto">
-        <div className="w-full max-w-4xl space-y-5">
+      <div className="fixed inset-0 z-20 flex items-start justify-center p-6 bg-[#070a10]/80 overflow-y-auto">
+        <div className="my-auto w-full max-w-4xl space-y-5">
           <div className="rounded-xl bg-[#0d121c]/95 border border-slate-700/80 p-6 shadow-2xl flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <div
