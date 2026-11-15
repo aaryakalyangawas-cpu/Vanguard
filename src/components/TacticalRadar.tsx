@@ -73,6 +73,17 @@ export const TacticalRadar: React.FC<TacticalRadarProps> = ({
               />
             );
           }
+          if (b.team === 'turret') {
+            return (
+              <polygon
+                key={`t-${idx}`}
+                points={`${pos.x},${pos.y - 4.5} ${pos.x + 4.5},${pos.y} ${pos.x},${pos.y + 4.5} ${pos.x - 4.5},${pos.y}`}
+                fill="#e2e8f0"
+                stroke="#0a0d12"
+                strokeWidth="1"
+              />
+            );
+          }
           const isBlue = b.team === 'blue';
           return (
             <circle

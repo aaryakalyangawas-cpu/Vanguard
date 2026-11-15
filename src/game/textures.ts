@@ -442,3 +442,132 @@ export function createBunkerFloorTextures(maxAnisotropy: number): FloorTextureSe
   return { map, bumpMap, roughnessMap };
 }
 
+export function createSoftGlowTexture(
+  innerColor = 'rgba(255, 240, 200, 1)',
+  midColor = 'rgba(255, 165, 60, 0.45)',
+  outerColor = 'rgba(255, 120, 20, 0)'
+): THREE.CanvasTexture {
+  const [canvas, ctx] = makeCanvas(128);
+  const grad = ctx.createRadialGradient(64, 64, 2, 64, 64, 62);
+  grad.addColorStop(0, innerColor);
+  grad.addColorStop(0.32, midColor);
+  grad.addColorStop(1, outerColor);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+export function createBulletHoleTexture(): THREE.CanvasTexture {
+  const [canvas, ctx] = makeCanvas(64);
+  ctx.clearRect(0, 0, 64, 64);
+
+  const scorch = ctx.createRadialGradient(32, 32, 3, 32, 32, 26);
+  scorch.addColorStop(0, 'rgba(10, 12, 16, 0.95)');
+  scorch.addColorStop(0.32, 'rgba(22, 25, 32, 0.72)');
+  scorch.addColorStop(0.65, 'rgba(40, 44, 52, 0.28)');
+  scorch.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = scorch;
+  ctx.fillRect(0, 0, 64, 64);
+
+  // Inner dark crater
+  ctx.fillStyle = '#06070a';
+  ctx.beginPath();
+  ctx.arc(32, 32, 7.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Radial micro-cracks
+  ctx.strokeStyle = 'rgba(15, 18, 24, 0.65)';
+  ctx.lineWidth = 1.4;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + 0.3;
+    ctx.beginPath();
+    ctx.moveTo(32 + Math.cos(a) * 6, 32 + Math.sin(a) * 6);
+    ctx.lineTo(32 + Math.cos(a) * (15 + (i % 2) * 5), 32 + Math.sin(a) * (15 + (i % 2) * 5));
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+export function createSandbagTextures(maxAnisotropy: number): {
+  map: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+} {
+  const [canvas, ctx] = makeCanvas(256);
+  const [bumpCanvas, bCtx] = makeCanvas(256);
+
+  ctx.fillStyle = '#7c6e56';
+  ctx.fillRect(0, 0, 256, 256);
+  bCtx.fillStyle = '#707070';
+  bCtx.fillRect(0, 0, 256, 256);
+
+  // Stacked burlap sandbag rows
+  for (let row = 0; row < 6; row++) {
+    const y = row * 42;
+    const off = (row % 2) * 42;
+    for (let x = -42 + off; x < 256; x += 84) {
+      ctx.fillStyle = row % 2 === 0 ? '#87785e' : '#776952';
+      ctx.fillRect(x + 2, y + 3, 80, 36);
+      ctx.strokeStyle = '#3f3628';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x + 2, y + 3, 80, 36);
+
+      bCtx.fillStyle = '#c8c8c8';
+      bCtx.fillRect(x + 4, y + 5, 76, 32);
+      bCtx.strokeStyle = '#202020';
+      bCtx.lineWidth = 4;
+      bCtx.strokeRect(x + 2, y + 3, 80, 36);
+    }
+  }
+
+  // Burlap weave grit
+  for (let i = 0; i < 1600; i++) {
+    ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.08)';
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+  }
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2, 1);
+  map.anisotropy = maxAnisotropy;
+
+  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+  bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(2, 1);
+  bumpMap.anisotropy = maxAnisotropy;
+
+  return { map, bumpMap };
+}
+
+export function createWeaponDetailTextures(): {
+  brushedBump: THREE.CanvasTexture;
+  woodMap: THREE.CanvasTexture;
+} {
+  const [bCanvas, bCtx] = makeCanvas(128);
+  bCtx.fillStyle = '#808080';
+  bCtx.fillRect(0, 0, 128, 128);
+  for (let y = 0; y < 128; y++) {
+    bCtx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+    bCtx.fillRect(0, y, 128, 1);
+  }
+  const brushedBump = new THREE.CanvasTexture(bCanvas);
+  brushedBump.wrapS = brushedBump.wrapT = THREE.RepeatWrapping;
+
+  const [wCanvas, wCtx] = makeCanvas(128);
+  wCtx.fillStyle = '#6b3e24';
+  wCtx.fillRect(0, 0, 128, 128);
+  for (let y = 0; y < 128; y += 3) {
+    wCtx.fillStyle = y % 6 === 0 ? 'rgba(42,20,8,0.35)' : 'rgba(140,88,48,0.18)';
+    wCtx.fillRect(0, y, 128, 2);
+  }
+  const woodMap = new THREE.CanvasTexture(wCanvas);
+  woodMap.colorSpace = THREE.SRGBColorSpace;
+  woodMap.wrapS = woodMap.wrapT = THREE.RepeatWrapping;
+
+  return { brushedBump, woodMap };
+}

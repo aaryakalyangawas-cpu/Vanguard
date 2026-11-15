@@ -33,7 +33,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                 Vanguard Arena
               </h1>
               <p className="text-sm text-slate-400 mt-1">
-                Lightweight browser 3D Team Deathmatch · 3 Tactical Maps · 6 Realistic Firearms
+                Browser 3D Team Deathmatch · 3 Maps · 7 Weapons + RPG-7 · Fixed .50 Cal HMGs · Frag Grenades
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -101,14 +101,14 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                 <h2 className="font-display text-base font-semibold text-slate-100">
                   Select Starting Weapon
                 </h2>
-                <span className="text-xs text-slate-400">All 6 firearms available in-match (1–6)</span>
+                <span className="text-xs text-slate-400">All 7 weapons available in-match (1–7)</span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {WEAPON_ORDER.map((wid: WeaponId) => {
                   const w = WEAPONS[wid];
                   const selected = config.startingWeapon === wid;
-                  const dmgPct = Math.min(100, Math.round(((w.damage * w.pellets) / 152) * 100));
+                  const dmgPct = Math.min(100, Math.round(((w.damage * w.pellets) / 160) * 100));
                   const rofPct = Math.min(100, Math.round((w.rpm / 880) * 100));
                   const rngPct = Math.min(100, Math.round((w.range / 195) * 100));
                   return (
@@ -261,7 +261,15 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span>Switch Weapon / Reload</span>
-                  <span className="font-mono text-slate-300">1–6 / Wheel · R</span>
+                  <span className="font-mono text-slate-300">1–7 / Wheel · R</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Frag Grenade (Hold to Cook)</span>
+                  <span className="font-mono text-slate-300">G</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Mount / Dismount .50 Cal HMG</span>
+                  <span className="font-mono text-slate-300">E</span>
                 </div>
               </div>
             </div>

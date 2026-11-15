@@ -1,6 +1,6 @@
 export type TeamId = 'blue' | 'red';
 
-export type WeaponId = 'm4a1' | 'ak74' | 'mp5' | 'm870' | 'mk14' | 'm24';
+export type WeaponId = 'm4a1' | 'ak74' | 'mp5' | 'm870' | 'mk14' | 'm24' | 'rpg7';
 
 export type MapId = 'yard' | 'outpost' | 'bunker';
 
@@ -18,12 +18,12 @@ export type GamePhase = 'lobby' | 'playing' | 'paused' | 'ended';
 
 export interface WeaponSpec {
   id: WeaponId;
-  slot: 1 | 2 | 3 | 4 | 5 | 6;
+  slot: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   name: string;
   shortName: string;
   caliber: string;
   role: string;
-  fireMode: 'AUTO' | 'PUMP' | 'SEMI' | 'BOLT';
+  fireMode: 'AUTO' | 'PUMP' | 'SEMI' | 'BOLT' | 'ROCKET';
   damage: number;
   headshotMult: number;
   pellets: number;
@@ -39,6 +39,8 @@ export interface WeaponSpec {
   adsFov: number;
   moveSpeedMult: number;
   range: number;
+  muzzleVelocity: number; // m/s
+  gravityScale: number;
   tracerColor: number;
   accentHex: string;
 }
@@ -92,7 +94,7 @@ export interface DamageDirectionIndicator {
 export interface RadarBlip {
   x: number;
   z: number;
-  team: TeamId | 'pickup_health' | 'pickup_ammo';
+  team: TeamId | 'pickup_health' | 'pickup_ammo' | 'turret';
   alive?: boolean;
 }
 
@@ -127,4 +129,14 @@ export interface HudSnapshot {
   pointerLocked: boolean;
   pickupNotice: string | null;
   arenaHalfSize: number;
+  grenades: number;
+  maxGrenades: number;
+  isCookingGrenade: boolean;
+  grenadeCookProgress: number;
+  mountedMg: {
+    active: boolean;
+    heat: number;
+    overheated: boolean;
+    nearPrompt: boolean;
+  };
 }

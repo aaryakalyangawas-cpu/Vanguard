@@ -40,7 +40,7 @@ class SoundEngine {
     return buffer;
   }
 
-  public playGunshot(weaponId: WeaponId, volumeScale = 1.0) {
+  public playGunshot(weaponId: WeaponId | 'hmg', volumeScale = 1.0) {
     const ctx = this.ensureContext();
     if (!ctx || !this.noiseBuffer) return;
 
@@ -156,6 +156,44 @@ class SoundEngine {
       noise.stop(now + 0.24);
       osc.start(now);
       osc.stop(now + 0.16);
+    } else if (weaponId === 'hmg') {
+      // Heavy .50 Cal Browning mounted MG thunderous punch
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(2200, now);
+      filter.frequency.exponentialRampToValueAtTime(240, now + 0.21);
+      noiseGain.gain.setValueAtTime(1.4, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(105, now);
+      osc.frequency.exponentialRampToValueAtTime(36, now + 0.16);
+      oscGain.gain.setValueAtTime(0.95, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.17);
+
+      noise.start(now);
+      noise.stop(now + 0.23);
+      osc.start(now);
+      osc.stop(now + 0.18);
+    } else if (weaponId === 'rpg7') {
+      // Rocket booster ignition whoosh + backblast thump
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(620, now);
+      filter.frequency.exponentialRampToValueAtTime(1450, now + 0.18);
+      filter.frequency.exponentialRampToValueAtTime(320, now + 0.52);
+      filter.Q.value = 0.7;
+      noiseGain.gain.setValueAtTime(1.45, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.54);
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(130, now);
+      osc.frequency.exponentialRampToValueAtTime(34, now + 0.35);
+      oscGain.gain.setValueAtTime(1.05, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.36);
+
+      noise.start(now);
+      noise.stop(now + 0.56);
+      osc.start(now);
+      osc.stop(now + 0.38);
     } else {
       // M24 SWS bolt-action rifle supersonic crack + bolt cycle
       filter.type = 'bandpass';
@@ -188,6 +226,88 @@ class SoundEngine {
 
     osc.connect(oscGain);
     oscGain.connect(master);
+  }
+
+  public playExplosion(volumeScale = 1.0) {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.noiseBuffer) return;
+
+    const now = ctx.currentTime;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.58 * volumeScale, now);
+    master.connect(ctx.destination);
+
+    // Filtered blast rumble
+    const noise = ctx.createBufferSource();
+    noise.buffer = this.noiseBuffer;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1600, now);
+    lp.frequency.exponentialRampToValueAtTime(95, now + 0.85);
+    const nGain = ctx.createGain();
+    nGain.gain.setValueAtTime(1.3, now);
+    nGain.gain.exponentialRampToValueAtTime(0.008, now + 0.9);
+    noise.connect(lp);
+    lp.connect(nGain);
+    nGain.connect(master);
+    noise.start(now);
+    noise.stop(now + 0.92);
+
+    // Sub-bass shockwave thump
+    const sub = ctx.createOscillator();
+    const sGain = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(95, now);
+    sub.frequency.exponentialRampToValueAtTime(24, now + 0.45);
+    sGain.gain.setValueAtTime(1.2, now);
+    sGain.gain.exponentialRampToValueAtTime(0.006, now + 0.48);
+    sub.connect(sGain);
+    sGain.connect(master);
+    sub.start(now);
+    sub.stop(now + 0.5);
+  }
+
+  public playPinPull() {
+    this.playMechanicalClick(920, 0.035);
+    window.setTimeout(() => this.playMechanicalClick(1280, 0.025), 55);
+  }
+
+  public playGrenadeBounce(volumeScale = 0.5) {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(420 + Math.random() * 90, now);
+    osc.frequency.exponentialRampToValueAtTime(160, now + 0.055);
+    gain.gain.setValueAtTime(0.11 * volumeScale, now);
+    gain.gain.exponentialRampToValueAtTime(0.004, now + 0.06);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.065);
+  }
+
+  public playBulletWhiz() {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.noiseBuffer) return;
+    const now = ctx.currentTime;
+    const noise = ctx.createBufferSource();
+    noise.buffer = this.noiseBuffer;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 3.2;
+    bp.frequency.setValueAtTime(3400, now);
+    bp.frequency.exponentialRampToValueAtTime(750, now + 0.09);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.004, now + 0.095);
+    noise.connect(bp);
+    bp.connect(gain);
+    gain.connect(ctx.destination);
+    noise.start(now);
+    noise.stop(now + 0.1);
   }
 
   public playMechanicalClick(freq = 520, dur = 0.045) {
