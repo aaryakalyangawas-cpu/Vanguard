@@ -84,6 +84,21 @@ export const TacticalRadar: React.FC<TacticalRadarProps> = ({
               />
             );
           }
+          if (b.team === 'vehicle') {
+            return (
+              <rect
+                key={`v-${idx}`}
+                x={pos.x - 4.5}
+                y={pos.y - 3}
+                width={9}
+                height={6}
+                rx={1.5}
+                fill="#38bdf8"
+                stroke="#0a0d12"
+                strokeWidth="1.2"
+              />
+            );
+          }
           const isBlue = b.team === 'blue';
           return (
             <circle

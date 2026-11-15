@@ -28,12 +28,15 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
   const activeSpec = WEAPONS[hud.activeWeapon];
   const activeState = hud.weapons[hud.activeWeapon];
   const isMounted = hud.mountedMg.active;
+  const inVehicle = hud.vehicle.active;
   const isFullScope =
     !isMounted &&
+    !inVehicle &&
     (hud.activeWeapon === 'm24' || hud.activeWeapon === 'mk14' || hud.activeWeapon === 'rpg7') &&
     hud.isAds;
   const isOpticSight =
     !isMounted &&
+    !inVehicle &&
     hud.isAds &&
     (hud.activeWeapon === 'm4a1' ||
       hud.activeWeapon === 'ak74' ||
@@ -310,8 +313,14 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
         </div>
       </div>
 
-      {/* Mounted HMG Interact Prompt & Cooking Grenade Meter */}
-      {hud.isAlive && hud.mountedMg.nearPrompt && !isMounted && (
+      {/* Vehicle / Mounted HMG Interact Prompts */}
+      {hud.isAlive && hud.vehicle.nearPromptName && !inVehicle && !isMounted && (
+        <div className="absolute bottom-36 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-md bg-[#0b0f17]/92 border border-sky-400/60 text-xs font-medium text-sky-200 shadow-lg">
+          Press <span className="font-mono font-bold text-sky-400">[E]</span> to Enter {hud.vehicle.nearPromptName}
+        </div>
+      )}
+
+      {hud.isAlive && hud.mountedMg.nearPrompt && !isMounted && !inVehicle && (
         <div className="absolute bottom-36 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-md bg-[#0b0f17]/92 border border-amber-500/60 text-xs font-medium text-amber-200 shadow-lg">
           Press <span className="font-mono font-bold text-amber-400">[E]</span> to Mount .50 Cal M2HB Turret
         </div>
@@ -396,10 +405,10 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
         </div>
       </div>
 
-      {/* Bottom Right: Grenades, Active Weapon / Mounted HMG, Reload & 1-7 Slots */}
+      {/* Bottom Right: Grenades, Active Weapon / Vehicle / Mounted HMG, Reload & 1-7 Slots */}
       <div className="absolute bottom-5 right-5 flex flex-col items-end gap-2">
         {/* Reloading bar */}
-        {hud.isReloading && !isMounted && (
+        {hud.isReloading && !isMounted && !inVehicle && (
           <div className="w-64 bg-[#0b0f17]/90 border border-amber-500/40 rounded px-3 py-2">
             <div className="flex justify-between text-xs text-amber-300 mb-1">
               <span>Reloading</span>
@@ -415,7 +424,7 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
         )}
 
         {/* Frag Grenade Strip */}
-        {!isMounted && (
+        {!isMounted && !inVehicle && (
           <div className="px-3 py-1 rounded bg-[#0b0f17]/88 border border-slate-700/75 text-xs flex items-center gap-2">
             <span className="font-mono font-semibold text-amber-400">[G]</span>
             <span className="text-slate-300">M67 Frag</span>
@@ -425,8 +434,69 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
           </div>
         )}
 
-        {/* Active Ammo Card OR Mounted .50 Cal HMG Card */}
-        {isMounted ? (
+        {/* Active Vehicle Card OR Mounted .50 Cal HMG Card OR Infantry Weapon Card */}
+        {inVehicle ? (
+          <div className="w-84 bg-[#0b0f17]/92 border border-sky-400/60 rounded-lg p-3.5 shadow-lg">
+            <div className="flex items-baseline justify-between gap-2 mb-2">
+              <div className="min-w-0">
+                <div className="font-display text-base font-bold text-sky-300 leading-tight">
+                  {hud.vehicle.name}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  {hud.vehicle.type === 'tank'
+                    ? '105mm HE Cannon · WASD Drive · E Exit'
+                    : '.50 Cal Pintle MG · WASD Drive · E Exit'}
+                </div>
+              </div>
+              <div className="text-right font-mono tabular-nums shrink-0">
+                <span className="text-xl font-bold text-white">{hud.vehicle.speedKmh}</span>
+                <span className="text-[10px] text-slate-400 ml-1">km/h</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] mb-1">
+              <span className="text-slate-400">Hull Armor</span>
+              <span className="font-mono text-slate-200 tabular-nums">
+                {Math.ceil(hud.vehicle.health)} / {hud.vehicle.maxHealth}
+              </span>
+            </div>
+            <div className="w-full h-2 bg-slate-800 rounded-sm overflow-hidden mb-2.5">
+              <div
+                className={`h-full transition-all duration-75 ${
+                  hud.vehicle.health / hud.vehicle.maxHealth < 0.3
+                    ? 'bg-red-500'
+                    : 'bg-sky-400'
+                }`}
+                style={{
+                  width: `${Math.max(0, Math.min(100, (hud.vehicle.health / hud.vehicle.maxHealth) * 100))}%`,
+                }}
+              />
+            </div>
+
+            {hud.vehicle.type === 'tank' ? (
+              <>
+                <div className="flex items-center justify-between text-[11px] mb-1">
+                  <span className={hud.vehicle.weaponCooldownPct >= 1 ? 'text-emerald-400 font-semibold' : 'text-amber-300'}>
+                    {hud.vehicle.weaponCooldownPct >= 1 ? '105mm Shell Loaded' : 'Autoloader Cycling'}
+                  </span>
+                  <span className="font-mono text-slate-300 tabular-nums">
+                    {Math.round(hud.vehicle.weaponCooldownPct * 100)}%
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-800 rounded-sm overflow-hidden">
+                  <div
+                    className={`h-full ${hud.vehicle.weaponCooldownPct >= 1 ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                    style={{ width: `${Math.round(hud.vehicle.weaponCooldownPct * 100)}%` }}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="text-[11px] text-slate-400 font-mono">
+                LMB Fire · RMB Zoom · Space Handbrake
+              </div>
+            )}
+          </div>
+        ) : isMounted ? (
           <div className="w-80 bg-[#0b0f17]/92 border border-amber-500/60 rounded-lg p-3.5 shadow-lg">
             <div className="flex items-baseline justify-between gap-2 mb-2">
               <div className="min-w-0">
@@ -484,7 +554,7 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
         )}
 
         {/* 1-7 Weapon Quick Slots */}
-        {!isMounted && (
+        {!isMounted && !inVehicle && (
           <div className="flex items-center gap-1 flex-wrap justify-end">
             {WEAPON_ORDER.map((wid) => {
               const spec = WEAPONS[wid];

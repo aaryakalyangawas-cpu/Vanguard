@@ -6,6 +6,7 @@ import {
   groundHeightAt,
   MountedMgNode,
   resolveHorizontalCollision,
+  VehicleNode,
 } from './arena';
 import { soundEngine } from './audio';
 import { buildCombatantRig, CombatantRig } from './botModel';
@@ -26,8 +27,30 @@ import {
 } from './types';
 import { buildWeaponViewmodel, ViewmodelHandle, WEAPON_ORDER, WEAPONS } from './weapons';
 
-const BLUE_CALLSIGNS = ['Vanguard-1', 'Falcon', 'Kestrel', 'Titan', 'Specter'];
-const RED_CALLSIGNS = ['Viper', 'Ravager', 'Onyx', 'Phantom', 'Striker'];
+const BLUE_CALLSIGNS = [
+  'Vanguard-1',
+  'Falcon',
+  'Kestrel',
+  'Titan',
+  'Specter',
+  'Nomad',
+  'Valkyrie',
+  'Paladin',
+  'Hawkeye',
+  'Sentinel',
+];
+const RED_CALLSIGNS = [
+  'Viper',
+  'Ravager',
+  'Onyx',
+  'Phantom',
+  'Striker',
+  'Reaper',
+  'Cobra',
+  'Wraith',
+  'Jackal',
+  'Scorpion',
+];
 
 const _vecA = new THREE.Vector3();
 const _vecB = new THREE.Vector3();
@@ -60,6 +83,9 @@ interface RocketProjectile {
   life: number;
   smokeAccum: number;
   mesh: THREE.Group;
+  blastRadius?: number;
+  maxDamage?: number;
+  weaponShort?: string;
 }
 
 interface FragGrenade {
@@ -131,6 +157,7 @@ interface CombatantActor {
   fireCooldown: number;
   grenadeCooldown: number;
   reactionTimer: number;
+  losTimer: number;
   targetEnemyId: string | null;
   deathAnimTimer: number;
   walkCycle: number;
@@ -202,7 +229,7 @@ export class FpsEngine {
   private pumpAnimTimer = 0;
   private cameraShake = 0;
 
-  // Grenade & Mounted MG state
+  // Grenade, Mounted MG & Vehicle state
   private grenades = 2;
   private readonly maxGrenades = 3;
   private isCookingGrenade = false;
@@ -210,6 +237,9 @@ export class FpsEngine {
   private activeMountedMg: MountedMgNode | null = null;
   private nearMountedMg: MountedMgNode | null = null;
   private hmgFlashTimer = 0;
+  private activeVehicle: VehicleNode | null = null;
+  private nearVehicle: VehicleNode | null = null;
+  private vehicleFlashTimer = 0;
 
   private hitmarkerType: 'none' | 'body' | 'head' | 'kill' = 'none';
   private hitmarkerTime = 0;
@@ -339,7 +369,7 @@ export class FpsEngine {
     const aspect =
       (container.clientWidth || window.innerWidth) /
       (container.clientHeight || window.innerHeight);
-    this.camera = new THREE.PerspectiveCamera(75, aspect, 0.08, 280);
+    this.camera = new THREE.PerspectiveCamera(75, aspect, 0.08, 420);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
 
@@ -475,6 +505,7 @@ export class FpsEngine {
       fireCooldown: 0,
       grenadeCooldown: 0,
       reactionTimer: 0,
+      losTimer: 0,
       targetEnemyId: null,
       deathAnimTimer: 0,
       walkCycle: 0,
@@ -513,6 +544,7 @@ export class FpsEngine {
         fireCooldown: 0.4,
         grenadeCooldown: 6 + Math.random() * 8,
         reactionTimer: 0.25,
+        losTimer: Math.random() * 0.14,
         targetEnemyId: null,
         deathAnimTimer: 0,
         walkCycle: Math.random() * 6,
@@ -552,6 +584,7 @@ export class FpsEngine {
         fireCooldown: 0.4,
         grenadeCooldown: 5 + Math.random() * 7,
         reactionTimer: 0.25,
+        losTimer: Math.random() * 0.14,
         targetEnemyId: null,
         deathAnimTimer: 0,
         walkCycle: Math.random() * 6,
@@ -604,12 +637,16 @@ export class FpsEngine {
     this.activeMountedMg = null;
     this.nearMountedMg = null;
     this.hmgFlashTimer = 0;
+    this.activeVehicle = null;
+    this.nearVehicle = null;
+    this.vehicleFlashTimer = 0;
     this.cameraShake = 0;
     this.explosionLight.intensity = 0;
     this.explosionLightTimer = 0;
 
     this.clearDynamicEffects();
     this.resetMountedMgs();
+    this.resetVehicles();
 
     for (const p of this.arena.pickups) {
       p.active = true;
@@ -639,10 +676,37 @@ export class FpsEngine {
     }
   }
 
+  private resetVehicles() {
+    for (const v of this.arena.vehicles) {
+      this.respawnVehicle(v);
+    }
+  }
+
+  private respawnVehicle(v: VehicleNode) {
+    v.position.copy(v.spawnPos);
+    v.yaw = v.spawnYaw;
+    v.speed = 0;
+    v.turretYaw = 0;
+    v.turretPitch = 0;
+    v.health = v.maxHealth;
+    v.destroyed = false;
+    v.respawnTimer = 0;
+    v.fireCooldown = 0;
+    v.occupantId = null;
+    v.root.position.copy(v.spawnPos);
+    v.root.rotation.set(0, v.spawnYaw, 0);
+    v.turretGroup.rotation.y = 0;
+    v.barrelPivot.rotation.x = 0;
+    v.muzzleFlash.visible = false;
+    const baseColor =
+      v.teamHint === 'blue' ? 0x2c4a70 : v.teamHint === 'red' ? 0x6b2c2a : 0x4b533b;
+    v.bodyMat.color.setHex(baseColor);
+  }
+
   public resumeMatch() {
     if (this.phase === 'paused') {
       this.phase = 'playing';
-      this.weaponPivot.visible = !this.activeMountedMg;
+      this.weaponPivot.visible = !this.activeMountedMg && !this.activeVehicle;
       this.requestPointerLock();
       this.emitHud();
     }
@@ -671,8 +735,11 @@ export class FpsEngine {
     this.isCookingGrenade = false;
     this.activeMountedMg = null;
     this.nearMountedMg = null;
+    this.activeVehicle = null;
+    this.nearVehicle = null;
     this.clearDynamicEffects();
     this.resetMountedMgs();
+    this.resetVehicles();
     if (document.pointerLockElement === this.renderer.domElement) {
       document.exitPointerLock();
     }
@@ -777,21 +844,22 @@ export class FpsEngine {
 
     if (this.phase !== 'playing') return;
 
-    if (e.code === 'Digit1' && !this.activeMountedMg) this.selectWeapon('m4a1');
-    else if (e.code === 'Digit2' && !this.activeMountedMg) this.selectWeapon('ak74');
-    else if (e.code === 'Digit3' && !this.activeMountedMg) this.selectWeapon('mp5');
-    else if (e.code === 'Digit4' && !this.activeMountedMg) this.selectWeapon('m870');
-    else if (e.code === 'Digit5' && !this.activeMountedMg) this.selectWeapon('mk14');
-    else if (e.code === 'Digit6' && !this.activeMountedMg) this.selectWeapon('m24');
-    else if (e.code === 'Digit7' && !this.activeMountedMg) this.selectWeapon('rpg7');
-    else if (e.code === 'KeyQ' && !this.activeMountedMg) this.selectWeapon(this.lastWeapon);
-    else if (e.code === 'KeyR' && !this.activeMountedMg) this.startReload();
+    const lockedOut = Boolean(this.activeMountedMg || this.activeVehicle);
+    if (e.code === 'Digit1' && !lockedOut) this.selectWeapon('m4a1');
+    else if (e.code === 'Digit2' && !lockedOut) this.selectWeapon('ak74');
+    else if (e.code === 'Digit3' && !lockedOut) this.selectWeapon('mp5');
+    else if (e.code === 'Digit4' && !lockedOut) this.selectWeapon('m870');
+    else if (e.code === 'Digit5' && !lockedOut) this.selectWeapon('mk14');
+    else if (e.code === 'Digit6' && !lockedOut) this.selectWeapon('m24');
+    else if (e.code === 'Digit7' && !lockedOut) this.selectWeapon('rpg7');
+    else if (e.code === 'KeyQ' && !lockedOut) this.selectWeapon(this.lastWeapon);
+    else if (e.code === 'KeyR' && !lockedOut) this.startReload();
     else if (e.code === 'KeyF') this.adsToggle = !this.adsToggle;
-    else if (e.code === 'KeyE') this.toggleMountMg();
+    else if (e.code === 'KeyE') this.toggleMountInteractable();
     else if (e.code === 'KeyG' && !e.repeat) {
       if (
         this.player.alive &&
-        !this.activeMountedMg &&
+        !lockedOut &&
         this.grenades > 0 &&
         !this.isCookingGrenade
       ) {
@@ -803,7 +871,7 @@ export class FpsEngine {
         this.emitHud();
       }
     } else if (e.code === 'KeyV' || e.code === 'KeyZ') {
-      if (this.activeWeapon === 'm24' || this.activeWeapon === 'mk14') {
+      if (!lockedOut && (this.activeWeapon === 'm24' || this.activeWeapon === 'mk14')) {
         this.scopeZoomLevel = this.scopeZoomLevel === 1 ? 2 : 1;
         soundEngine.playMechanicalClick(680, 0.035);
         this.emitHud();
@@ -848,6 +916,16 @@ export class FpsEngine {
       return;
     }
 
+    if (this.activeVehicle) {
+      this.player.yaw -= e.movementX * sensScale * 0.85;
+      this.player.pitch = THREE.MathUtils.clamp(
+        this.player.pitch - e.movementY * sensScale * 0.72,
+        -0.22,
+        0.38
+      );
+      return;
+    }
+
     this.player.yaw -= e.movementX * sensScale;
     this.player.pitch = THREE.MathUtils.clamp(
       this.player.pitch - e.movementY * sensScale,
@@ -878,7 +956,7 @@ export class FpsEngine {
   };
 
   private handleWheel = (e: WheelEvent) => {
-    if (this.phase !== 'playing' || this.activeMountedMg) return;
+    if (this.phase !== 'playing' || this.activeMountedMg || this.activeVehicle) return;
     const idx = WEAPON_ORDER.indexOf(this.activeWeapon);
     const nextIdx = (idx + (e.deltaY > 0 ? 1 : -1) + WEAPON_ORDER.length) % WEAPON_ORDER.length;
     this.selectWeapon(WEAPON_ORDER[nextIdx]);
@@ -917,14 +995,22 @@ export class FpsEngine {
     this.shells.push({ mesh, vel, rotVel, life: 0.75 });
   }
 
-  private toggleMountMg() {
+  private toggleMountInteractable() {
     if (!this.player.alive) return;
+    if (this.activeVehicle) {
+      this.exitVehicle(false);
+      return;
+    }
     if (this.activeMountedMg) {
       this.activeMountedMg.muzzleFlash.visible = false;
       this.activeMountedMg = null;
       this.weaponPivot.visible = true;
       soundEngine.playMechanicalClick(380, 0.05);
       this.emitHud();
+      return;
+    }
+    if (this.nearVehicle && !this.nearVehicle.destroyed && !this.nearVehicle.occupantId) {
+      this.enterVehicle(this.nearVehicle);
       return;
     }
     if (this.nearMountedMg) {
@@ -940,6 +1026,156 @@ export class FpsEngine {
       soundEngine.playMechanicalClick(490, 0.06);
       this.emitHud();
     }
+  }
+
+  private enterVehicle(v: VehicleNode) {
+    this.activeVehicle = v;
+    v.occupantId = this.player.id;
+    this.isReloading = false;
+    this.reloadTimer = 0;
+    this.isCookingGrenade = false;
+    this.isAds = false;
+    this.adsToggle = false;
+    this.weaponPivot.visible = false;
+    this.player.yaw = v.yaw + v.turretYaw;
+    this.player.pitch = v.turretPitch;
+    soundEngine.playVehicleMount(true);
+    this.emitHud();
+  }
+
+  private exitVehicle(fromDeath: boolean) {
+    const v = this.activeVehicle;
+    if (!v) return;
+    v.muzzleFlash.visible = false;
+    v.occupantId = null;
+    this.activeVehicle = null;
+
+    if (!fromDeath) {
+      // Step out to left side of vehicle, clamped out of obstacles
+      const sideX = -Math.cos(v.yaw) * (v.type === 'tank' ? 2.6 : 2.1);
+      const sideZ = Math.sin(v.yaw) * (v.type === 'tank' ? 2.6 : 2.1);
+      this.player.position.set(v.position.x + sideX, v.position.y + 0.1, v.position.z + sideZ);
+      resolveHorizontalCollision(this.player.position, 0.48, 1.8, this.arena);
+      this.player.position.y = groundHeightAt(
+        this.player.position.x,
+        this.player.position.z,
+        this.player.position.y + 0.4,
+        this.arena
+      );
+      this.player.velocity.set(0, 0, 0);
+      this.weaponPivot.visible = true;
+      soundEngine.playVehicleMount(false);
+    }
+    this.emitHud();
+  }
+
+  private tryFireVehicle() {
+    const v = this.activeVehicle;
+    if (!this.player.alive || !v || v.destroyed || v.fireCooldown > 0) return;
+
+    const muzzleWorld = new THREE.Vector3();
+    v.muzzlePoint.getWorldPosition(muzzleWorld);
+
+    // Find convergence aim point along camera forward vector
+    const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+    this.raycaster.set(this.camera.position, camDir);
+    this.raycaster.far = 180;
+    const camHits = this.raycaster.intersectObjects(this.arena.staticRayMeshes, false);
+    const aimPoint =
+      camHits.length > 0
+        ? camHits[0].point.clone()
+        : this.camera.position.clone().addScaledVector(camDir, 120);
+    const barrelDir = aimPoint.sub(muzzleWorld).normalize();
+
+    v.muzzleFlash.visible = true;
+    v.muzzleFlash.rotation.z = Math.random() * Math.PI * 2;
+    this.vehicleFlashTimer = 0.055;
+
+    if (v.type === 'tank') {
+      v.fireCooldown = 2.1;
+      soundEngine.playCannonFire();
+      this.muzzleLight.color.setHex(0xff922b);
+      this.muzzleLight.intensity = 6.5;
+      this.cameraShake = Math.max(this.cameraShake, 0.34);
+
+      this.spawnCannonShell(muzzleWorld, barrelDir, this.player.id, this.player.team);
+      this.spawnSmokePuff(
+        muzzleWorld.clone().addScaledVector(barrelDir, 0.5),
+        barrelDir.clone().multiplyScalar(2.4),
+        0.75,
+        0.55,
+        2.2
+      );
+    } else {
+      v.fireCooldown = 60 / 500; // 500 RPM roof .50 Cal MG
+      soundEngine.playGunshot('hmg', 0.92);
+      this.muzzleLight.color.setHex(0xfef08a);
+      this.muzzleLight.intensity = 4.0;
+      this.cameraShake = Math.max(this.cameraShake, 0.06);
+
+      const spread = 0.01;
+      const shotDir = barrelDir
+        .clone()
+        .add(
+          new THREE.Vector3(
+            (Math.random() - 0.5) * 2 * spread,
+            (Math.random() - 0.5) * 2 * spread,
+            (Math.random() - 0.5) * 2 * spread
+          )
+        )
+        .normalize();
+
+      this.spawnBallisticBullet(
+        muzzleWorld.clone(),
+        muzzleWorld.clone(),
+        shotDir,
+        285,
+        0.42,
+        34,
+        1.7,
+        200,
+        this.player.id,
+        this.player.team,
+        '4x4 .50',
+        0xfef08a
+      );
+    }
+  }
+
+  private spawnCannonShell(pos: THREE.Vector3, dir: THREE.Vector3, attackerId: string, team: TeamId) {
+    const group = new THREE.Group();
+    const shellMat = new THREE.MeshStandardMaterial({
+      color: 0xd97706,
+      metalness: 0.75,
+      roughness: 0.25,
+    });
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xfde047,
+      transparent: true,
+      opacity: 0.92,
+    });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.52, 8), shellMat);
+    body.rotation.x = Math.PI / 2;
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.42, 7), glowMat);
+    flame.rotation.x = Math.PI / 2;
+    flame.position.z = 0.45;
+    group.add(body, flame);
+    group.position.copy(pos);
+    group.lookAt(pos.clone().add(dir));
+    this.scene.add(group);
+
+    this.rockets.push({
+      pos: pos.clone(),
+      vel: dir.clone().multiplyScalar(84),
+      attackerId,
+      team,
+      life: 4.0,
+      smokeAccum: 0,
+      mesh: group,
+      blastRadius: 6.5,
+      maxDamage: 145,
+      weaponShort: '105mm HE',
+    });
   }
 
   private tryFireMountedMg() {
@@ -1084,6 +1320,10 @@ export class FpsEngine {
   }
 
   private tryPlayerFire() {
+    if (this.activeVehicle) {
+      this.tryFireVehicle();
+      return;
+    }
     if (this.activeMountedMg) {
       this.tryFireMountedMg();
       return;
@@ -1376,11 +1616,28 @@ export class FpsEngine {
     }
     this.spawnSparks(center, 0xff9f2e, 14);
 
-    if (!attacker) return;
+    const blastEye = center.clone().add(new THREE.Vector3(0, 0.35, 0));
     let bestHit: 'none' | 'body' | 'kill' = 'none';
     let killedName: string | null = null;
 
-    const blastEye = center.clone().add(new THREE.Vector3(0, 0.35, 0));
+    // Damage vehicles within blast radius
+    for (const v of this.arena.vehicles) {
+      if (v.destroyed) continue;
+      const vCenter = new THREE.Vector3(v.position.x, v.position.y + 1.0, v.position.z);
+      const vDist = blastEye.distanceTo(vCenter);
+      if (vDist <= radius + 1.4) {
+        const vFalloff = Math.max(0.25, 1 - vDist / (radius + 1.4));
+        const vDmg = Math.round(maxDamage * 1.15 * vFalloff);
+        const destroyed = this.damageVehicle(v, vDmg, attacker);
+        if (attacker?.isPlayer) {
+          if (destroyed) bestHit = 'kill';
+          else if (bestHit === 'none') bestHit = 'body';
+        }
+      }
+    }
+
+    if (!attacker) return;
+
     for (const victim of this.actors) {
       if (!victim.alive) continue;
       if (victim.team === attacker.team && victim.id !== attacker.id) continue;
@@ -1415,6 +1672,55 @@ export class FpsEngine {
       }
       soundEngine.playHitmarker(bestHit === 'kill', bestHit === 'kill');
     }
+  }
+
+  private damageVehicle(
+    v: VehicleNode,
+    amount: number,
+    attacker: CombatantActor | undefined
+  ): boolean {
+    if (v.destroyed) return false;
+    if (v.occupantId && attacker) {
+      const occ = this.actors.find((a) => a.id === v.occupantId);
+      if (occ && occ.team === attacker.team && occ.id !== attacker.id) {
+        return false;
+      }
+    }
+
+    v.health = Math.max(0, v.health - amount);
+    if (v.occupantId === this.player?.id) {
+      soundEngine.playDamageTaken();
+      this.cameraShake = Math.min(0.6, this.cameraShake + amount * 0.004);
+    }
+
+    if (v.health <= 0) {
+      v.destroyed = true;
+      v.respawnTimer = 18;
+      v.speed = 0;
+      v.muzzleFlash.visible = false;
+      v.bodyMat.color.setHex(0x1f242b);
+
+      const occActor = v.occupantId ? this.actors.find((a) => a.id === v.occupantId) : undefined;
+      if (v.occupantId === this.player?.id && this.activeVehicle === v) {
+        this.exitVehicle(true);
+      }
+      v.occupantId = null;
+
+      if (occActor && occActor.alive && attacker) {
+        this.applyDamage(occActor, attacker, 150, false, 'Vehicle Blast');
+      }
+
+      this.triggerExplosion(
+        v.position.clone().add(new THREE.Vector3(0, 1.0, 0)),
+        7.0,
+        125,
+        attacker,
+        'Vehicle Blast'
+      );
+      return true;
+    }
+
+    return false;
   }
 
   private applyDamage(
@@ -1454,6 +1760,9 @@ export class FpsEngine {
       if (victim.isPlayer && this.activeMountedMg) {
         this.activeMountedMg.muzzleFlash.visible = false;
         this.activeMountedMg = null;
+      }
+      if (victim.isPlayer && this.activeVehicle) {
+        this.exitVehicle(true);
       }
       if (victim.isPlayer) {
         this.isCookingGrenade = false;
@@ -1503,6 +1812,10 @@ export class FpsEngine {
     this.isAds = false;
     this.isCookingGrenade = false;
     this.activeMountedMg = null;
+    if (this.activeVehicle) {
+      this.activeVehicle.occupantId = null;
+      this.activeVehicle = null;
+    }
     if (document.pointerLockElement === this.renderer.domElement) {
       document.exitPointerLock();
     }
@@ -1549,6 +1862,7 @@ export class FpsEngine {
       this.grenades = 2;
       this.isCookingGrenade = false;
       this.activeMountedMg = null;
+      this.activeVehicle = null;
       this.isReloading = false;
       this.reloadTimer = 0;
       this.recoilOffsetPitch = 0;
@@ -1717,6 +2031,14 @@ export class FpsEngine {
       }
     }
 
+    if (this.vehicleFlashTimer > 0) {
+      this.vehicleFlashTimer -= dt;
+      if (this.vehicleFlashTimer <= 0) {
+        for (const v of this.arena.vehicles) v.muzzleFlash.visible = false;
+        this.muzzleLight.intensity = 0;
+      }
+    }
+
     if (!p.alive) {
       p.respawnTimer -= dt;
       if (p.respawnTimer <= 0) {
@@ -1726,23 +2048,212 @@ export class FpsEngine {
       this.camera.rotation.set(-0.35, p.yaw, 0, 'YXZ');
       this.weaponPivot.visible = false;
       this.nearMountedMg = null;
+      this.nearVehicle = null;
       return;
     }
 
-    // Check proximity to any fixed .50 cal HMG emplacement
+    // Check proximity to any available vehicle or fixed .50 cal HMG emplacement
+    this.nearVehicle = null;
     this.nearMountedMg = null;
-    if (!this.activeMountedMg) {
-      let bestDist = 2.6;
-      for (const mg of this.arena.mountedMgs) {
-        const d = Math.hypot(p.position.x - mg.position.x, p.position.z - mg.position.z);
-        if (d < bestDist && Math.abs(p.position.y - mg.position.y) < 1.8) {
-          bestDist = d;
-          this.nearMountedMg = mg;
+    if (!this.activeMountedMg && !this.activeVehicle) {
+      let bestVehDist = 4.2;
+      for (const v of this.arena.vehicles) {
+        if (v.destroyed || v.occupantId) continue;
+        const d = Math.hypot(p.position.x - v.position.x, p.position.z - v.position.z);
+        if (d < bestVehDist && Math.abs(p.position.y - v.position.y) < 2.2) {
+          bestVehDist = d;
+          this.nearVehicle = v;
+        }
+      }
+
+      if (!this.nearVehicle) {
+        let bestDist = 2.6;
+        for (const mg of this.arena.mountedMgs) {
+          const d = Math.hypot(p.position.x - mg.position.x, p.position.z - mg.position.z);
+          if (d < bestDist && Math.abs(p.position.y - mg.position.y) < 1.8) {
+            bestDist = d;
+            this.nearMountedMg = mg;
+          }
         }
       }
     }
 
     if (this.fireCooldown > 0) this.fireCooldown -= dt;
+
+    // Active Tactical Vehicle Driving & Gunner Mode
+    if (this.activeVehicle) {
+      const v = this.activeVehicle;
+      this.weaponPivot.visible = false;
+      const wantZoom = this.mouseDownRight || this.adsToggle;
+      this.isAds = wantZoom;
+
+      const throttle =
+        (this.keys['KeyW'] || this.keys['ArrowUp'] ? 1 : 0) -
+        (this.keys['KeyS'] || this.keys['ArrowDown'] ? 1 : 0);
+      const steerInput =
+        (this.keys['KeyA'] || this.keys['ArrowLeft'] ? 1 : 0) -
+        (this.keys['KeyD'] || this.keys['ArrowRight'] ? 1 : 0);
+      const handbrake = Boolean(this.keys['Space']);
+
+      const maxFwd = v.type === 'tank' ? 13.5 : 22.0;
+      const maxRev = v.type === 'tank' ? -6.0 : -9.0;
+      const accelRate = v.type === 'tank' ? 14.5 : 24.0;
+      const turnRate = v.type === 'tank' ? 1.55 : 2.1;
+
+      if (handbrake) {
+        v.speed = THREE.MathUtils.damp(v.speed, 0, 12, dt);
+      } else if (throttle > 0) {
+        v.speed = Math.min(maxFwd, v.speed + accelRate * dt);
+      } else if (throttle < 0) {
+        v.speed = Math.max(maxRev, v.speed - accelRate * 1.15 * dt);
+      } else {
+        v.speed = THREE.MathUtils.damp(v.speed, 0, 3.2, dt);
+      }
+
+      if (Math.abs(steerInput) > 0) {
+        if (v.type === 'tank') {
+          const dirSign = v.speed < -0.5 ? -1 : 1;
+          v.yaw += steerInput * turnRate * dirSign * dt;
+        } else if (Math.abs(v.speed) > 0.35) {
+          const speedFactor = THREE.MathUtils.clamp(Math.abs(v.speed) / 9, 0.25, 1.0);
+          const dirSign = v.speed >= 0 ? 1 : -1;
+          v.yaw += steerInput * turnRate * speedFactor * dirSign * dt;
+        }
+      }
+
+      const prevX = v.position.x;
+      const prevZ = v.position.z;
+      const moveDist = v.speed * dt;
+      v.position.x += -Math.sin(v.yaw) * moveDist;
+      v.position.z += -Math.cos(v.yaw) * moveDist;
+
+      const vehRadius = v.type === 'tank' ? 2.15 : 1.75;
+      resolveHorizontalCollision(v.position, vehRadius, 2.3, this.arena);
+
+      // Separate from other vehicles
+      for (const otherV of this.arena.vehicles) {
+        if (otherV.id === v.id) continue;
+        const dx = v.position.x - otherV.position.x;
+        const dz = v.position.z - otherV.position.z;
+        const minSep = vehRadius + (otherV.type === 'tank' ? 2.15 : 1.75);
+        const dSq = dx * dx + dz * dz;
+        if (dSq > 0.0001 && dSq < minSep * minSep) {
+          const d = Math.sqrt(dSq);
+          const push = minSep - d;
+          v.position.x += (dx / d) * push;
+          v.position.z += (dz / d) * push;
+          v.speed *= 0.55;
+        }
+      }
+
+      const actualMoved = Math.hypot(v.position.x - prevX, v.position.z - prevZ);
+      if (Math.abs(moveDist) > 0.03 && actualMoved < Math.abs(moveDist) * 0.5) {
+        v.speed *= 0.45;
+      }
+
+      const targetY = groundHeightAt(v.position.x, v.position.z, v.position.y + 0.5, this.arena);
+      v.position.y = THREE.MathUtils.damp(v.position.y, targetY, 14, dt);
+
+      // Sync vehicle transforms & wheel spin
+      v.root.position.copy(v.position);
+      v.root.rotation.y = v.yaw;
+      const wheelRadius = v.type === 'tank' ? 0.38 : 0.48;
+      for (const w of v.wheels) {
+        w.rotation.x -= (v.speed / wheelRadius) * dt;
+      }
+
+      // Stabilized turret aligned to player mouse aim
+      v.turretYaw = this.player.yaw - v.yaw;
+      v.turretPitch = this.player.pitch;
+      v.turretGroup.rotation.y = v.turretYaw;
+      v.barrelPivot.rotation.x = v.turretPitch;
+
+      // Sync player anchor to vehicle cab
+      p.position.set(v.position.x, v.position.y + 0.65, v.position.z);
+      p.velocity.set(-Math.sin(v.yaw) * v.speed, 0, -Math.cos(v.yaw) * v.speed);
+
+      // Roadkill / Ramming enemy combatants at speed
+      const absSpeed = Math.abs(v.speed);
+      if (absSpeed > 6.5) {
+        for (const actor of this.actors) {
+          if (!actor.alive || actor.isPlayer) continue;
+          const dist = Math.hypot(actor.position.x - v.position.x, actor.position.z - v.position.z);
+          if (dist < vehRadius + 0.6 && Math.abs(actor.position.y - v.position.y) < 2.2) {
+            if (actor.team !== p.team) {
+              const ramDmg = Math.round(absSpeed * 12);
+              const killed = this.applyDamage(
+                actor,
+                p,
+                ramDmg,
+                false,
+                v.type === 'tank' ? 'IFV Ram' : '4x4 Ram'
+              );
+              this.hitmarkerType = killed ? 'kill' : 'body';
+              this.hitmarkerTime = performance.now();
+              if (killed) {
+                this.lastEliminatedName = actor.name;
+                this.lastEliminatedHeadshot = false;
+              }
+              soundEngine.playHitmarker(killed, killed);
+            } else {
+              // Nudge friendly bots safely outside hull
+              const nx = (actor.position.x - v.position.x) / Math.max(0.1, dist);
+              const nz = (actor.position.z - v.position.z) / Math.max(0.1, dist);
+              actor.position.x = v.position.x + nx * (vehRadius + 0.85);
+              actor.position.z = v.position.z + nz * (vehRadius + 0.85);
+            }
+          }
+        }
+      }
+
+      if (this.mouseDownLeft) {
+        this.tryFireVehicle();
+      }
+
+      // 3rd-person chase camera with wall-clip raycast guard
+      const camPivot = new THREE.Vector3(
+        v.position.x,
+        v.position.y + (v.type === 'tank' ? 2.45 : 2.3),
+        v.position.z
+      );
+      const camBackDist =
+        v.type === 'tank' ? (wantZoom ? 2.8 : 7.8) : wantZoom ? 2.4 : 6.2;
+      const aimDir = new THREE.Vector3(
+        -Math.sin(p.yaw) * Math.cos(p.pitch),
+        Math.sin(p.pitch),
+        -Math.cos(p.yaw) * Math.cos(p.pitch)
+      ).normalize();
+      const desiredCam = camPivot
+        .clone()
+        .addScaledVector(aimDir, -camBackDist)
+        .add(new THREE.Vector3(0, wantZoom ? 0.55 : 1.15, 0));
+
+      const toCam = desiredCam.clone().sub(camPivot);
+      const toCamLen = toCam.length();
+      if (toCamLen > 0.1) {
+        this.raycaster.set(camPivot, toCam.divideScalar(toCamLen));
+        this.raycaster.far = toCamLen;
+        const wallHits = this.raycaster.intersectObjects(this.arena.staticRayMeshes, false);
+        if (wallHits.length > 0) {
+          desiredCam.copy(camPivot).addScaledVector(toCam, Math.max(0.8, wallHits[0].distance - 0.35));
+        }
+      }
+
+      this.camera.position.copy(desiredCam);
+      this.camera.rotation.set(
+        THREE.MathUtils.clamp(p.pitch + shakeY, -1.2, 1.2),
+        p.yaw + shakeX,
+        0,
+        'YXZ'
+      );
+
+      const targetFov = wantZoom ? 44 : 78;
+      if (Math.abs(this.camera.fov - targetFov) > 0.05) {
+        this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 14, dt);
+        this.camera.updateProjectionMatrix();
+      }
+      return;
+    }
 
     // Mounted .50 Cal HMG Gunner Mode
     if (this.activeMountedMg) {
@@ -1752,7 +2263,7 @@ export class FpsEngine {
       this.isAds = wantZoom;
 
       if (this.keys['Space']) {
-        this.toggleMountMg();
+        this.toggleMountInteractable();
         return;
       }
 
@@ -2009,19 +2520,32 @@ export class FpsEngine {
 
       if (bot.fireCooldown > 0) bot.fireCooldown -= dt;
       if (bot.grenadeCooldown > 0) bot.grenadeCooldown -= dt;
+      bot.losTimer -= dt;
 
       const eyePos = _vecA.set(bot.position.x, bot.position.y + 1.55, bot.position.z);
       let visibleEnemy: CombatantActor | null = null;
-      let nearestEnemyDist = 65;
+      let nearestEnemyDist = 92;
 
-      for (const other of this.actors) {
-        if (other.team === bot.team || !other.alive) continue;
-        const d = bot.position.distanceTo(other.position);
-        if (d < nearestEnemyDist) {
-          const targetEye = _vecB.set(other.position.x, other.position.y + 1.38, other.position.z);
-          if (this.hasLineOfSight(eyePos, targetEye)) {
+      if (bot.losTimer <= 0) {
+        bot.losTimer = 0.13 + Math.random() * 0.05;
+        for (const other of this.actors) {
+          if (other.team === bot.team || !other.alive) continue;
+          const d = bot.position.distanceTo(other.position);
+          if (d < nearestEnemyDist) {
+            const targetEye = _vecB.set(other.position.x, other.position.y + 1.38, other.position.z);
+            if (this.hasLineOfSight(eyePos, targetEye)) {
+              nearestEnemyDist = d;
+              visibleEnemy = other;
+            }
+          }
+        }
+      } else if (bot.targetEnemyId) {
+        const cached = this.actors.find((a) => a.id === bot.targetEnemyId);
+        if (cached && cached.alive) {
+          const d = bot.position.distanceTo(cached.position);
+          if (d < 98) {
+            visibleEnemy = cached;
             nearestEnemyDist = d;
-            visibleEnemy = other;
           }
         }
       }
@@ -2342,7 +2866,7 @@ export class FpsEngine {
   }
 
   private updateEffects(dt: number) {
-    // 1. Mounted .50 Cal HMG barrel cooling & thermal glow
+    // 1. Mounted .50 Cal HMG barrel cooling & thermal glow + Vehicle cooldowns & wreck respawn
     for (const mg of this.arena.mountedMgs) {
       const coolingRate = mg.overheated ? 0.42 : 0.22;
       if (mg.heat > 0 && !(this.activeMountedMg === mg && this.mouseDownLeft && !mg.overheated)) {
@@ -2352,6 +2876,18 @@ export class FpsEngine {
         }
       }
       mg.barrelHeatMat.emissiveIntensity = mg.heat > 0.25 ? (mg.heat - 0.25) * 1.9 : 0;
+    }
+
+    for (const v of this.arena.vehicles) {
+      if (v.fireCooldown > 0) v.fireCooldown = Math.max(0, v.fireCooldown - dt);
+      if (v.destroyed) {
+        v.respawnTimer -= dt;
+        if (v.respawnTimer <= 0) {
+          this.respawnVehicle(v);
+        }
+      } else if (v.occupantId !== this.player?.id && Math.abs(v.speed) > 0.05) {
+        v.speed = THREE.MathUtils.damp(v.speed, 0, 4, dt);
+      }
     }
 
     // 2. Simulate Ballistic Bullets (velocity, gravity drop, drag, swept collision, whiz, decals)
@@ -2381,14 +2917,37 @@ export class FpsEngine {
       const worldDist = worldHits.length > 0 ? worldHits[0].distance : stepDist + 1;
 
       let hitActor: CombatantActor | null = null;
+      let hitVehicle: VehicleNode | null = null;
       let hitPoint = new THREE.Vector3();
       let hitHead = false;
       let hitDist = worldDist;
+
+      // Test active tactical vehicles
+      const vehicleMeshes: THREE.Object3D[] = [];
+      for (const v of this.arena.vehicles) {
+        if (v.destroyed) continue;
+        if (this.activeVehicle === v && b.attackerId === this.player.id) continue;
+        vehicleMeshes.push(...v.hitMeshes);
+      }
+      if (vehicleMeshes.length > 0) {
+        const vHits = this.raycaster.intersectObjects(vehicleMeshes, false);
+        if (vHits.length > 0 && vHits[0].distance < hitDist) {
+          const vh = vHits[0];
+          const vid = vh.object.userData.vehicleId as string;
+          const vFound = this.arena.vehicles.find((vv) => vv.id === vid);
+          if (vFound && !vFound.destroyed) {
+            hitDist = vh.distance;
+            hitVehicle = vFound;
+            hitPoint.copy(vh.point);
+          }
+        }
+      }
 
       // Collect opposing rig meshes
       const enemyMeshes: THREE.Object3D[] = [];
       for (const actor of this.actors) {
         if (!actor.alive || actor.team === b.team) continue;
+        if (actor.isPlayer && this.activeVehicle) continue;
         if (actor.isPlayer) {
           const pCenter = _vecC.set(actor.position.x, actor.position.y + 1.12, actor.position.z);
           lineSeg.set(b.pos, nextPos);
@@ -2399,6 +2958,7 @@ export class FpsEngine {
             if (dFromOrigin < hitDist) {
               hitDist = dFromOrigin;
               hitActor = actor;
+              hitVehicle = null;
               hitPoint.copy(closestPt);
               hitHead = closestPt.y > actor.position.y + 1.48;
             }
@@ -2420,10 +2980,24 @@ export class FpsEngine {
           if (found && found.alive) {
             hitDist = h.distance;
             hitActor = found;
+            hitVehicle = null;
             hitPoint.copy(h.point);
             hitHead = h.object.userData.hitbox === 'head';
           }
         }
+      }
+
+      if (hitVehicle) {
+        const attacker = this.actors.find((a) => a.id === b.attackerId);
+        const destroyed = this.damageVehicle(hitVehicle, Math.round(b.damage * 0.85), attacker);
+        this.spawnSparks(hitPoint, 0xfbbf24, 5);
+        if (attacker?.isPlayer) {
+          this.hitmarkerType = destroyed ? 'kill' : 'body';
+          this.hitmarkerTime = performance.now();
+          soundEngine.playHitmarker(destroyed, destroyed);
+        }
+        this.removeBulletAt(i);
+        continue;
       }
 
       if (hitActor) {
@@ -2482,11 +3056,11 @@ export class FpsEngine {
       }
     }
 
-    // 3. Simulate RPG-7 Rockets
+    // 3. Simulate RPG-7 Rockets & 105mm Tank Cannon Shells
     for (let i = this.rockets.length - 1; i >= 0; i--) {
       const r = this.rockets[i];
       r.life -= dt;
-      r.vel.y -= 9.81 * 0.25 * dt;
+      r.vel.y -= 9.81 * (r.weaponShort ? 0.35 : 0.25) * dt;
       nextPos.copy(r.pos).addScaledVector(r.vel, dt);
 
       segDir.copy(nextPos).sub(r.pos);
@@ -2504,22 +3078,43 @@ export class FpsEngine {
         impacted = true;
         impactPoint.copy(worldHits[0].point);
       } else {
-        for (const actor of this.actors) {
-          if (!actor.alive || actor.id === r.attackerId) continue;
-          const aCenter = _vecC.set(actor.position.x, actor.position.y + 1.1, actor.position.z);
-          lineSeg.set(r.pos, nextPos);
-          lineSeg.closestPointToPoint(aCenter, true, closestPt);
-          if (closestPt.distanceToSquared(aCenter) < 0.72) {
+        const vehMeshes: THREE.Object3D[] = [];
+        for (const v of this.arena.vehicles) {
+          if (v.destroyed) continue;
+          if (v.occupantId === r.attackerId) continue;
+          vehMeshes.push(...v.hitMeshes);
+        }
+        if (vehMeshes.length > 0) {
+          const vh = this.raycaster.intersectObjects(vehMeshes, false);
+          if (vh.length > 0) {
             impacted = true;
-            impactPoint.copy(closestPt);
-            break;
+            impactPoint.copy(vh[0].point);
+          }
+        }
+        if (!impacted) {
+          for (const actor of this.actors) {
+            if (!actor.alive || actor.id === r.attackerId) continue;
+            const aCenter = _vecC.set(actor.position.x, actor.position.y + 1.1, actor.position.z);
+            lineSeg.set(r.pos, nextPos);
+            lineSeg.closestPointToPoint(aCenter, true, closestPt);
+            if (closestPt.distanceToSquared(aCenter) < 0.72) {
+              impacted = true;
+              impactPoint.copy(closestPt);
+              break;
+            }
           }
         }
       }
 
       if (impacted || r.life <= 0) {
         const attacker = this.actors.find((a) => a.id === r.attackerId);
-        this.triggerExplosion(impactPoint, 6.8, 160, attacker, 'RPG-7');
+        this.triggerExplosion(
+          impactPoint,
+          r.blastRadius ?? 6.8,
+          r.maxDamage ?? 160,
+          attacker,
+          r.weaponShort ?? 'RPG-7'
+        );
         this.removeRocketAt(i);
         continue;
       }
@@ -2691,13 +3286,13 @@ export class FpsEngine {
 
     if (this.phase === 'lobby' || this.phase === 'ended') {
       this.lobbyOrbitAngle += dt * 0.14;
-      const radius = 34;
+      const radius = 56;
       this.camera.position.set(
         Math.cos(this.lobbyOrbitAngle) * radius,
-        15,
+        24,
         Math.sin(this.lobbyOrbitAngle) * radius
       );
-      this.camera.lookAt(0, 1.5, 0);
+      this.camera.lookAt(0, 2.0, 0);
       if (this.camera.fov !== 62) {
         this.camera.fov = 62;
         this.camera.updateProjectionMatrix();
@@ -2791,6 +3386,14 @@ export class FpsEngine {
         team: 'turret',
       });
     }
+    for (const v of this.arena.vehicles) {
+      if (v.destroyed) continue;
+      radarBlips.push({
+        x: v.position.x,
+        z: v.position.z,
+        team: 'vehicle',
+      });
+    }
 
     const scoreboard: ScoreboardEntry[] = this.actors
       .map((a) => ({
@@ -2845,7 +3448,17 @@ export class FpsEngine {
           ? 2.7
           : 1.4,
       crosshairSpread: Math.round(
-        THREE.MathUtils.clamp((this.activeMountedMg ? 0.009 : spreadRad) * 780, 4, 58)
+        THREE.MathUtils.clamp(
+          (this.activeVehicle
+            ? this.activeVehicle.type === 'tank'
+              ? 0.008
+              : 0.011
+            : this.activeMountedMg
+            ? 0.009
+            : spreadRad) * 780,
+          4,
+          58
+        )
       ),
       hitmarkerType: this.hitmarkerType,
       hitmarkerTime: this.hitmarkerTime,
@@ -2872,7 +3485,24 @@ export class FpsEngine {
         active: this.activeMountedMg !== null,
         heat: this.activeMountedMg ? this.activeMountedMg.heat : 0,
         overheated: this.activeMountedMg ? this.activeMountedMg.overheated : false,
-        nearPrompt: this.nearMountedMg !== null && this.activeMountedMg === null,
+        nearPrompt: this.nearMountedMg !== null && this.activeMountedMg === null && this.activeVehicle === null,
+      },
+      vehicle: {
+        active: this.activeVehicle !== null,
+        type: this.activeVehicle ? this.activeVehicle.type : null,
+        name: this.activeVehicle ? this.activeVehicle.name : '',
+        health: this.activeVehicle ? this.activeVehicle.health : 0,
+        maxHealth: this.activeVehicle ? this.activeVehicle.maxHealth : 100,
+        speedKmh: this.activeVehicle ? Math.round(Math.abs(this.activeVehicle.speed) * 3.6) : 0,
+        weaponCooldownPct: this.activeVehicle
+          ? this.activeVehicle.type === 'tank'
+            ? 1 - Math.min(1, this.activeVehicle.fireCooldown / 2.1)
+            : 1
+          : 1,
+        nearPromptName:
+          this.nearVehicle && !this.activeVehicle && !this.activeMountedMg
+            ? this.nearVehicle.name
+            : null,
       },
     });
   }

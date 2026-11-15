@@ -45,23 +45,23 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
             return (
               <tr
                 key={row.id}
-                className={`text-sm border-b border-slate-800/50 ${
+                className={`text-xs border-b border-slate-800/50 ${
                   row.isPlayer ? 'bg-slate-800/70 text-white font-semibold' : 'text-slate-300'
                 }`}
               >
-                <td className="py-2 pr-2 truncate max-w-[140px]">
+                <td className="py-1.5 pr-2 truncate max-w-[140px]">
                   {row.name}
                   {!row.alive && (
-                    <span className="ml-2 text-[11px] font-normal text-slate-500">MIA</span>
+                    <span className="ml-1.5 text-[10px] font-normal text-slate-500">MIA</span>
                   )}
                 </td>
-                <td className="py-2 pr-2 text-xs text-slate-400 whitespace-nowrap">
+                <td className="py-1.5 pr-2 text-[11px] text-slate-400 whitespace-nowrap">
                   {WEAPONS[row.weaponId].shortName}
                 </td>
-                <td className="py-2 text-right font-mono tabular-nums">{row.kills}</td>
-                <td className="py-2 text-right font-mono tabular-nums text-slate-400">{row.deaths}</td>
-                <td className="py-2 text-right font-mono tabular-nums text-slate-400">{row.assists}</td>
-                <td className="py-2 text-right font-mono tabular-nums text-amber-400">{kd}</td>
+                <td className="py-1.5 text-right font-mono tabular-nums">{row.kills}</td>
+                <td className="py-1.5 text-right font-mono tabular-nums text-slate-400">{row.deaths}</td>
+                <td className="py-1.5 text-right font-mono tabular-nums text-slate-400">{row.assists}</td>
+                <td className="py-1.5 text-right font-mono tabular-nums text-amber-400">{kd}</td>
               </tr>
             );
           })}
@@ -71,8 +71,8 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
   );
 
   return (
-    <div className="w-full max-w-4xl mx-auto rounded-xl bg-[#0d121c]/95 border border-slate-700/80 p-6 shadow-2xl">
-      <div className="flex items-center justify-between mb-5 pb-4 border-b border-slate-800">
+    <div className="w-full max-w-4xl mx-auto rounded-xl bg-[#0d121c]/95 border border-slate-700/80 p-5 shadow-2xl">
+      <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
         <div>
           <h2 className="font-display text-lg font-bold text-white">Team Deathmatch Standings</h2>
           <p className="text-xs text-slate-400 mt-0.5">First team to {scoreLimit} eliminations wins</p>
@@ -90,7 +90,7 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-h-[56vh] overflow-y-auto pr-1">
         {renderTeamTable('Vanguard (Blue)', 'text-blue-400', blueTeam)}
         {renderTeamTable('Syndicate (Red)', 'text-red-400', redTeam)}
       </div>

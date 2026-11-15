@@ -10,29 +10,29 @@ import {
   createSoftGlowTexture,
   createSteelDeckTextures,
 } from './textures';
-import { MapId, MapInfo } from './types';
+import { MapId, MapInfo, VehicleType } from './types';
 
 export const MAPS: Record<MapId, MapInfo> = {
   yard: {
     id: 'yard',
     name: 'Industrial Yard',
     environment: 'Dusk Cargo Terminal',
-    sizeLabel: '80×80m · Balanced',
-    description: 'Elevated steel overpass, shipping containers, and 3-lane courtyard cover.',
+    sizeLabel: '140×140m · Armor & Infantry',
+    description: 'Expanded cargo terminal with dual perimeter motorways, steel overpass, and armored vehicles.',
   },
   outpost: {
     id: 'outpost',
     name: 'Desert Outpost',
     environment: 'Arid Canyon FOB',
-    sizeLabel: '92×92m · Long Range',
-    description: 'Sandstone compound walls, elevated sniper towers, and wide canyon sightlines.',
+    sizeLabel: '160×160m · Long Range',
+    description: 'Wide sandstone canyon compound, elevated watchtowers, and open armored vehicle flanks.',
   },
   bunker: {
     id: 'bunker',
     name: 'Cryo Bunker',
     environment: 'Subterranean Facility',
-    sizeLabel: '68×68m · Close Quarters',
-    description: 'Tight containment corridors, central reactor catwalk, and rapid flanking routes.',
+    sizeLabel: '120×120m · CQB + Armor',
+    description: 'Large subterranean containment hall, central reactor platform, and wide armored corridors.',
   },
 };
 
@@ -83,6 +83,34 @@ export interface MountedMgNode {
   barrelHeatMat: THREE.MeshStandardMaterial;
 }
 
+export interface VehicleNode {
+  id: string;
+  type: VehicleType;
+  name: string;
+  teamHint: 'blue' | 'red' | 'neutral';
+  spawnPos: THREE.Vector3;
+  spawnYaw: number;
+  position: THREE.Vector3;
+  yaw: number;
+  speed: number;
+  turretYaw: number;
+  turretPitch: number;
+  health: number;
+  maxHealth: number;
+  destroyed: boolean;
+  respawnTimer: number;
+  fireCooldown: number;
+  root: THREE.Group;
+  turretGroup: THREE.Group;
+  barrelPivot: THREE.Group;
+  muzzlePoint: THREE.Object3D;
+  muzzleFlash: THREE.Group;
+  wheels: THREE.Mesh[];
+  hitMeshes: THREE.Object3D[];
+  bodyMat: THREE.MeshStandardMaterial;
+  occupantId: string | null;
+}
+
 export interface ArenaAtmosphere {
   bgColor: number;
   fogColor: number;
@@ -107,6 +135,7 @@ export interface ArenaData {
   waypoints: THREE.Vector3[];
   pickups: PickupNode[];
   mountedMgs: MountedMgNode[];
+  vehicles: VehicleNode[];
   halfSize: number;
   disposables: {
     geometries: THREE.BufferGeometry[];
@@ -125,7 +154,7 @@ function buildSkyDome(
   geometries: THREE.BufferGeometry[],
   materials: THREE.Material[]
 ): THREE.Mesh {
-  const geo = new THREE.SphereGeometry(230, 32, 20);
+  const geo = new THREE.SphereGeometry(340, 32, 20);
   geometries.push(geo);
 
   const mat = new THREE.ShaderMaterial({
@@ -656,18 +685,337 @@ export function createTacticalArena(
     };
   };
 
+  const tireMat = trackMat(
+    new THREE.MeshStandardMaterial({ color: 0x15181e, roughness: 0.9, metalness: 0.08 })
+  );
+  const rimMat = trackMat(
+    new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.35, metalness: 0.85 })
+  );
+  const headlightMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xfef9c3,
+      emissive: 0xfef08a,
+      emissiveIntensity: 1.4,
+      roughness: 0.15,
+    })
+  );
+  const glassMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      roughness: 0.12,
+      metalness: 0.9,
+      transparent: true,
+      opacity: 0.72,
+    })
+  );
+
+  const addTacticalVehicle = (
+    id: string,
+    type: VehicleType,
+    x: number,
+    yBase: number,
+    z: number,
+    yaw: number,
+    teamHint: 'blue' | 'red' | 'neutral'
+  ): VehicleNode => {
+    const root = new THREE.Group();
+    root.position.set(x, yBase, z);
+    root.rotation.y = yaw;
+    rootGroup.add(root);
+
+    const baseColor =
+      teamHint === 'blue' ? 0x2c4a70 : teamHint === 'red' ? 0x6b2c2a : 0x4b533b;
+    const bodyMat = trackMat(
+      new THREE.MeshStandardMaterial({
+        color: baseColor,
+        roughness: 0.56,
+        metalness: 0.44,
+      })
+    );
+    const hitMeshes: THREE.Object3D[] = [];
+    const wheels: THREE.Mesh[] = [];
+
+    const regHit = (m: THREE.Object3D) => {
+      m.userData.vehicleId = id;
+      hitMeshes.push(m);
+    };
+
+    const turretGroup = new THREE.Group();
+    const barrelPivot = new THREE.Group();
+    const muzzlePoint = new THREE.Object3D();
+    const muzzleFlash = new THREE.Group();
+    const flashMat = trackMat(
+      new THREE.MeshBasicMaterial({
+        color: type === 'tank' ? 0xff922b : 0xfef08a,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false,
+      })
+    );
+
+    if (type === 'jeep') {
+      // Tactical 4x4 Recon Utility Vehicle
+      const chassis = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.05, 0.58, 4.15)), bodyMat);
+      chassis.position.set(0, 0.72, 0);
+      chassis.castShadow = true;
+      chassis.receiveShadow = true;
+      root.add(chassis);
+      regHit(chassis);
+
+      // Sloped armored hood + bull-bar bumper
+      const hood = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.94, 0.36, 1.35)), bodyMat);
+      hood.position.set(0, 1.05, -1.25);
+      hood.rotation.x = 0.08;
+      hood.castShadow = true;
+      root.add(hood);
+      regHit(hood);
+
+      const bumper = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.15, 0.24, 0.22)), darkMetalMat);
+      bumper.position.set(0, 0.62, -2.14);
+      root.add(bumper);
+
+      for (const hx of [-0.68, 0.68]) {
+        const hl = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.26, 0.14, 0.08)), headlightMat);
+        hl.position.set(hx, 0.92, -2.08);
+        const tl = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.24, 0.14, 0.08)), accentRedMat);
+        tl.position.set(hx, 0.85, 2.08);
+        root.add(hl, tl);
+      }
+
+      // Windshield frame & cab roll cage
+      const windshield = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.82, 0.58, 0.08)), glassMat);
+      windshield.position.set(0, 1.38, -0.52);
+      windshield.rotation.x = -0.32;
+      root.add(windshield);
+
+      const roof = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.88, 0.1, 1.95)), bodyMat);
+      roof.position.set(0, 1.72, 0.42);
+      roof.castShadow = true;
+      root.add(roof);
+      regHit(roof);
+
+      for (const [px, pz] of [
+        [-0.88, -0.45],
+        [0.88, -0.45],
+        [-0.88, 1.35],
+        [0.88, 1.35],
+      ]) {
+        const pillar = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.1, 0.72, 0.1)), darkMetalMat);
+        pillar.position.set(px, 1.36, pz);
+        root.add(pillar);
+      }
+
+      // Rear spare tire
+      const spare = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.42, 0.42, 0.24, 14)), tireMat);
+      spare.rotation.x = Math.PI / 2;
+      spare.position.set(0, 0.95, 2.18);
+      root.add(spare);
+
+      // 4 Off-road Wheels
+      const wheelGeo = trackGeo(new THREE.CylinderGeometry(0.48, 0.48, 0.34, 14));
+      wheelGeo.rotateZ(Math.PI / 2);
+      const hubGeo = trackGeo(new THREE.CylinderGeometry(0.22, 0.22, 0.36, 10));
+      hubGeo.rotateZ(Math.PI / 2);
+      for (const [wx, wz] of [
+        [-1.08, -1.32],
+        [1.08, -1.32],
+        [-1.08, 1.32],
+        [1.08, 1.32],
+      ]) {
+        const wMesh = new THREE.Mesh(wheelGeo, tireMat);
+        wMesh.position.set(wx, 0.48, wz);
+        wMesh.castShadow = true;
+        const hub = new THREE.Mesh(hubGeo, rimMat);
+        wMesh.add(hub);
+        root.add(wMesh);
+        wheels.push(wMesh);
+      }
+
+      // Roof-mounted .50 Cal MG Pintle Turret
+      turretGroup.position.set(0, 1.82, 0.35);
+      root.add(turretGroup);
+      const ringMount = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.32, 0.36, 0.14, 12)), darkMetalMat);
+      turretGroup.add(ringMount);
+      turretGroup.add(barrelPivot);
+      barrelPivot.position.set(0, 0.22, 0);
+
+      const mgBody = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.14, 0.16, 0.56)), gunSteelMat);
+      mgBody.position.set(0, 0, -0.1);
+      const mgBarrel = new THREE.Mesh(
+        trackGeo(new THREE.CylinderGeometry(0.025, 0.03, 0.95, 10)),
+        gunSteelMat
+      );
+      mgBarrel.rotation.x = Math.PI / 2;
+      mgBarrel.position.set(0, 0.02, -0.78);
+      barrelPivot.add(mgBody, mgBarrel);
+
+      muzzlePoint.position.set(0, 0.02, -1.32);
+      barrelPivot.add(muzzlePoint);
+
+      muzzleFlash.position.set(0, 0.02, -1.36);
+      const f1 = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(0.46, 0.12)), flashMat);
+      const f2 = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(0.12, 0.46)), flashMat);
+      muzzleFlash.add(f1, f2);
+      muzzleFlash.visible = false;
+      barrelPivot.add(muzzleFlash);
+
+      return {
+        id,
+        type,
+        name: 'Tactical 4×4 Recon',
+        teamHint,
+        spawnPos: new THREE.Vector3(x, yBase, z),
+        spawnYaw: yaw,
+        position: new THREE.Vector3(x, yBase, z),
+        yaw,
+        speed: 0,
+        turretYaw: 0,
+        turretPitch: 0,
+        health: 280,
+        maxHealth: 280,
+        destroyed: false,
+        respawnTimer: 0,
+        fireCooldown: 0,
+        root,
+        turretGroup,
+        barrelPivot,
+        muzzlePoint,
+        muzzleFlash,
+        wheels,
+        hitMeshes,
+        bodyMat,
+        occupantId: null,
+      };
+    }
+
+    // Armored IFV / Light Tank
+    const hull = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.75, 0.92, 4.95)), bodyMat);
+    hull.position.set(0, 0.96, 0);
+    hull.castShadow = true;
+    hull.receiveShadow = true;
+    root.add(hull);
+    regHit(hull);
+
+    // Front sloped glacis armor
+    const glacis = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.68, 0.56, 1.25)), bodyMat);
+    glacis.position.set(0, 1.05, -2.25);
+    glacis.rotation.x = 0.46;
+    glacis.castShadow = true;
+    root.add(glacis);
+    regHit(glacis);
+
+    // Side armored track skirts + 5 road wheels per side
+    for (const sx of [-1.42, 1.42]) {
+      const skirt = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.38, 0.54, 4.85)), darkMetalMat);
+      skirt.position.set(sx, 0.68, 0);
+      skirt.castShadow = true;
+      root.add(skirt);
+      regHit(skirt);
+
+      for (let wi = -2; wi <= 2; wi++) {
+        const roadWheel = new THREE.Mesh(
+          trackGeo(new THREE.CylinderGeometry(0.38, 0.38, 0.42, 12)),
+          tireMat
+        );
+        roadWheel.rotation.z = Math.PI / 2;
+        roadWheel.position.set(sx * 0.96, 0.38, wi * 1.02);
+        root.add(roadWheel);
+        wheels.push(roadWheel);
+      }
+    }
+
+    // Headlights + rear engine deck
+    for (const hx of [-0.95, 0.95]) {
+      const hl = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.28, 0.15, 0.08)), headlightMat);
+      hl.position.set(hx, 1.1, -2.65);
+      root.add(hl);
+    }
+
+    // Rotating 360° Armored Turret + 105mm Cannon
+    turretGroup.position.set(0, 1.48, 0.15);
+    root.add(turretGroup);
+
+    const turretHull = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.92, 0.68, 2.35)), bodyMat);
+    turretHull.position.set(0, 0.34, 0.1);
+    turretHull.castShadow = true;
+    turretGroup.add(turretHull);
+    regHit(turretHull);
+
+    const cupola = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.36, 0.4, 0.26, 12)), darkMetalMat);
+    cupola.position.set(0.45, 0.78, 0.35);
+    turretGroup.add(cupola);
+    regHit(cupola);
+
+    turretGroup.add(barrelPivot);
+    barrelPivot.position.set(0, 0.36, -1.05);
+
+    const mantlet = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.62, 0.36, 0.48)), darkMetalMat);
+    mantlet.position.set(0, 0, -0.1);
+    const mainGun = new THREE.Mesh(
+      trackGeo(new THREE.CylinderGeometry(0.085, 0.11, 2.9, 12)),
+      gunSteelMat
+    );
+    mainGun.rotation.x = Math.PI / 2;
+    mainGun.position.set(0, 0, -1.52);
+    mainGun.castShadow = true;
+    const muzzleBrake = new THREE.Mesh(
+      trackGeo(new THREE.BoxGeometry(0.24, 0.2, 0.34)),
+      darkMetalMat
+    );
+    muzzleBrake.position.set(0, 0, -2.98);
+    barrelPivot.add(mantlet, mainGun, muzzleBrake);
+
+    muzzlePoint.position.set(0, 0, -3.18);
+    barrelPivot.add(muzzlePoint);
+
+    muzzleFlash.position.set(0, 0, -3.25);
+    const tf1 = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(1.15, 0.32)), flashMat);
+    const tf2 = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(0.32, 1.15)), flashMat);
+    muzzleFlash.add(tf1, tf2);
+    muzzleFlash.visible = false;
+    barrelPivot.add(muzzleFlash);
+
+    return {
+      id,
+      type,
+      name: 'Striker Armored IFV',
+      teamHint,
+      spawnPos: new THREE.Vector3(x, yBase, z),
+      spawnYaw: yaw,
+      position: new THREE.Vector3(x, yBase, z),
+      yaw,
+      speed: 0,
+      turretYaw: 0,
+      turretPitch: 0,
+      health: 580,
+      maxHealth: 580,
+      destroyed: false,
+      respawnTimer: 0,
+      fireCooldown: 0,
+      root,
+      turretGroup,
+      barrelPivot,
+      muzzlePoint,
+      muzzleFlash,
+      wheels,
+      hitMeshes,
+      bodyMat,
+      occupantId: null,
+    };
+  };
+
   // =========================================================================
-  // MAP 1: INDUSTRIAL YARD (Dusk Cargo Terminal, 80x80m)
+  // MAP 1: INDUSTRIAL YARD (Expanded 140x140m Cargo Terminal + Vehicle Lanes)
   // =========================================================================
   if (mapId === 'yard') {
-    const halfSize = 40;
+    const halfSize = 70;
     const atmosphere: ArenaAtmosphere = {
       bgColor: 0x28262b,
       fogColor: 0x22252e,
-      fogDensity: 0.0085,
+      fogDensity: 0.0054,
       sunColor: 0xffdfba,
       sunIntensity: 2.35,
-      sunPos: [38, 42, 22],
+      sunPos: [55, 58, 32],
       hemiSky: 0x93c5fd,
       hemiGround: 0x262930,
       hemiIntensity: 0.92,
@@ -678,6 +1026,9 @@ export function createTacticalArena(
     );
 
     const floorTexSet = createArenaFloorTextures(maxAnisotropy);
+    floorTexSet.map.repeat.set(28, 28);
+    floorTexSet.bumpMap.repeat.set(28, 28);
+    floorTexSet.roughnessMap.repeat.set(28, 28);
     const concreteTexSet = createConcreteWallTextures(maxAnisotropy);
     const blueContainerTex = createContainerTextures('#1e3a5f', '#3b82f6', maxAnisotropy);
     const redContainerTex = createContainerTextures('#5c1f24', '#ef4444', maxAnisotropy);
@@ -776,7 +1127,7 @@ export function createTacticalArena(
       })
     );
 
-    const outerGround = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(460, 460)), outerGroundMat);
+    const outerGround = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(580, 580)), outerGroundMat);
     outerGround.rotation.x = -Math.PI / 2;
     outerGround.position.y = -0.04;
     outerGround.receiveShadow = true;
@@ -849,28 +1200,28 @@ export function createTacticalArena(
       });
     };
 
-    const wallH = 6.5;
-    const wallT = 2.0;
+    const wallH = 7.0;
+    const wallT = 2.4;
     addBox(0, wallH / 2, -halfSize - wallT / 2, halfSize * 2 + wallT * 2, wallH, wallT, concreteMat);
     addBox(0, wallH / 2, halfSize + wallT / 2, halfSize * 2 + wallT * 2, wallH, wallT, concreteMat);
     addBox(-halfSize - wallT / 2, wallH / 2, 0, wallT, wallH, halfSize * 2, concreteMat);
     addBox(halfSize + wallT / 2, wallH / 2, 0, wallT, wallH, halfSize * 2, concreteMat);
 
     for (const [tx, tz] of [
-      [-38, -38],
-      [38, -38],
-      [-38, 38],
-      [38, 38],
+      [-67, -67],
+      [67, -67],
+      [-67, 67],
+      [67, 67],
     ]) {
-      const pole = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.28, 0.38, 15, 10)), darkMetalMat);
-      pole.position.set(tx, 7.5, tz);
+      const pole = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.32, 0.44, 18, 10)), darkMetalMat);
+      pole.position.set(tx, 9, tz);
       rootGroup.add(pole);
-      const head = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.6, 0.9, 0.8)), darkMetalMat);
-      head.position.set(tx, 15.1, tz);
+      const head = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.2, 1.0, 0.9)), darkMetalMat);
+      head.position.set(tx, 18.1, tz);
       head.lookAt(0, 0, 0);
       rootGroup.add(head);
-      const panel = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(2.2, 0.65)), floodLampMat);
-      panel.position.set(0, 0, 0.42);
+      const panel = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(2.7, 0.75)), floodLampMat);
+      panel.position.set(0, 0, 0.48);
       head.add(panel);
 
       const haloMat = trackMat(
@@ -883,8 +1234,8 @@ export function createTacticalArena(
         })
       );
       const halo = new THREE.Sprite(haloMat);
-      halo.scale.set(9.5, 9.5, 1);
-      halo.position.set(0, 0, 0.65);
+      halo.scale.set(12, 12, 1);
+      halo.position.set(0, 0, 0.7);
       head.add(halo);
     }
 
@@ -892,90 +1243,112 @@ export function createTacticalArena(
       new THREE.MeshStandardMaterial({ color: 0x1a212d, roughness: 0.88, metalness: 0.25 })
     );
     for (const [sx, sz, sw, sh, sd] of [
-      [-68, -58, 18, 24, 18],
-      [0, -78, 38, 18, 14],
-      [66, -62, 20, 30, 20],
-      [-74, 48, 22, 26, 20],
-      [70, 56, 24, 21, 22],
-      [-84, 0, 14, 19, 44],
-      [86, -8, 16, 25, 38],
-      [12, 84, 34, 16, 16],
+      [-98, -88, 22, 30, 22],
+      [0, -108, 48, 24, 18],
+      [96, -92, 24, 34, 24],
+      [-104, 78, 26, 28, 24],
+      [100, 86, 28, 24, 26],
+      [-114, 0, 18, 24, 52],
+      [116, -8, 20, 30, 44],
+      [14, 114, 42, 20, 18],
     ]) {
       const bldg = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(sw, sh, sd)), distantMat);
       bldg.position.set(sx, sh / 2 - 0.04, sz);
       rootGroup.add(bldg);
     }
 
+    // Central Elevated Steel Overpass (wide enough for infantry & flank battles)
     const bridgeY = 2.8;
-    addBox(0, bridgeY - 0.25, 0, 18, 0.5, 8, deckMat, true);
-    for (const px of [-7.5, 7.5]) {
-      for (const pz of [-2.8, 2.8]) {
-        addBox(px, (bridgeY - 0.5) / 2, pz, 0.9, bridgeY - 0.5, 0.9, darkMetalMat, true);
+    addBox(0, bridgeY - 0.25, 0, 22, 0.5, 10, deckMat, true);
+    for (const px of [-9.5, 9.5]) {
+      for (const pz of [-3.8, 3.8]) {
+        addBox(px, (bridgeY - 0.5) / 2, pz, 1.0, bridgeY - 0.5, 1.0, darkMetalMat, true);
       }
     }
-    addBox(0, bridgeY + 0.55, -3.85, 16, 1.1, 0.28, darkMetalMat, true);
-    addBox(0, bridgeY + 0.55, 3.85, 16, 1.1, 0.28, darkMetalMat, true);
-    addBox(0, bridgeY + 1.12, -3.85, 16, 0.08, 0.3, amberMat, false, false);
-    addBox(0, bridgeY + 1.12, 3.85, 16, 0.08, 0.3, amberMat, false, false);
+    addBox(0, bridgeY + 0.55, -4.85, 20, 1.1, 0.28, darkMetalMat, true);
+    addBox(0, bridgeY + 0.55, 4.85, 20, 1.1, 0.28, darkMetalMat, true);
+    addBox(0, bridgeY + 1.12, -4.85, 20, 0.08, 0.3, amberMat, false, false);
+    addBox(0, bridgeY + 1.12, 4.85, 20, 0.08, 0.3, amberMat, false, false);
 
-    buildRamp(-18, -9, 0, 5.2, 0, bridgeY, deckMat);
-    buildRamp(18, 9, 0, 5.2, 0, bridgeY, deckMat);
+    buildRamp(-21, -11, 0, 5.6, 0, bridgeY, deckMat);
+    buildRamp(21, 11, 0, 5.6, 0, bridgeY, deckMat);
 
-    addShippingContainer(-12, 29, 8, 3.1, 3.2, blueContainerMat);
-    addShippingContainer(12, 29, 8, 3.1, 3.2, blueContainerMat);
-    addBox(0, 1.1, 31, 6.5, 2.2, 1.4, concreteMat);
-    addBox(0, 2.25, 31, 6.6, 0.14, 1.46, accentBlueMat, false, false);
+    // Team Base Compounds (South Blue, North Red)
+    addShippingContainer(-16, 48, 9, 3.2, 3.4, blueContainerMat);
+    addShippingContainer(16, 48, 9, 3.2, 3.4, blueContainerMat);
+    addBox(0, 1.1, 52, 8.5, 2.2, 1.6, concreteMat);
+    addBox(0, 2.25, 52, 8.6, 0.14, 1.66, accentBlueMat, false, false);
 
-    addShippingContainer(-12, -29, 8, 3.1, 3.2, redContainerMat);
-    addShippingContainer(12, -29, 8, 3.1, 3.2, redContainerMat);
-    addBox(0, 1.1, -31, 6.5, 2.2, 1.4, concreteMat);
-    addBox(0, 2.25, -31, 6.6, 0.14, 1.46, accentRedMat, false, false);
+    addShippingContainer(-16, -48, 9, 3.2, 3.4, redContainerMat);
+    addShippingContainer(16, -48, 9, 3.2, 3.4, redContainerMat);
+    addBox(0, 1.1, -52, 8.5, 2.2, 1.6, concreteMat);
+    addBox(0, 2.25, -52, 8.6, 0.14, 1.66, accentRedMat, false, false);
 
-    addShippingContainer(-24, -12, 3.2, 3.2, 8.5, slateContainerMat);
-    addShippingContainer(-24, 12, 3.2, 3.2, 8.5, slateContainerMat);
-    addBox(-31, 1.35, 0, 4.2, 2.7, 5.4, concreteMat);
+    // Mid-Arena & Outer Motorway Shipping Container Clusters (leaving wide vehicle lanes at x=±34..±64)
+    addShippingContainer(-28, -18, 3.4, 3.2, 9.5, slateContainerMat);
+    addShippingContainer(-28, 18, 3.4, 3.2, 9.5, slateContainerMat);
+    addShippingContainer(28, -18, 3.4, 3.2, 9.5, slateContainerMat);
+    addShippingContainer(28, 18, 3.4, 3.2, 9.5, slateContainerMat);
 
-    addShippingContainer(24, -12, 3.2, 3.2, 8.5, slateContainerMat);
-    addShippingContainer(24, 12, 3.2, 3.2, 8.5, slateContainerMat);
-    addBox(31, 1.35, 0, 4.2, 2.7, 5.4, concreteMat);
+    addShippingContainer(-52, -32, 3.4, 3.2, 9.0, slateContainerMat);
+    addShippingContainer(-52, 32, 3.4, 3.2, 9.0, slateContainerMat);
+    addShippingContainer(52, -32, 3.4, 3.2, 9.0, slateContainerMat);
+    addShippingContainer(52, 32, 3.4, 3.2, 9.0, slateContainerMat);
+    addBox(-54, 1.4, 0, 4.6, 2.8, 6.2, concreteMat);
+    addBox(54, 1.4, 0, 4.6, 2.8, 6.2, concreteMat);
 
-    addJerseyBarrier(-11, -16, 5.0);
-    addJerseyBarrier(11, -16, 5.0);
-    addJerseyBarrier(-11, 16, 5.0);
-    addJerseyBarrier(11, 16, 5.0);
+    addJerseyBarrier(-12, -24, 6.0);
+    addJerseyBarrier(12, -24, 6.0);
+    addJerseyBarrier(-12, 24, 6.0);
+    addJerseyBarrier(12, 24, 6.0);
+    addJerseyBarrier(-38, 0, 5.5);
+    addJerseyBarrier(38, 0, 5.5);
 
     for (const [cx, cz] of [
-      [-19, 22],
-      [19, 22],
-      [-19, -22],
-      [19, -22],
-      [-5, -10],
-      [5, 10],
+      [-22, 36],
+      [22, 36],
+      [-22, -36],
+      [22, -36],
+      [-8, -14],
+      [8, 14],
+      [-40, -18],
+      [40, 18],
     ]) {
-      addBox(cx, 0.75, cz, 1.6, 1.5, 1.6, darkMetalMat);
-      addBox(cx + 1.4, 0.55, cz + 0.3, 1.1, 1.1, 1.1, slateContainerMat);
+      addBox(cx, 0.75, cz, 1.7, 1.5, 1.7, darkMetalMat);
+      addBox(cx + 1.5, 0.55, cz + 0.3, 1.15, 1.1, 1.15, slateContainerMat);
     }
 
     for (const [dx, dz, olive] of [
-      [-14, 10, true],
-      [14, -10, false],
-      [-21, -5, true],
-      [21, 5, false],
+      [-16, 12, true],
+      [16, -12, false],
+      [-32, -5, true],
+      [32, 5, false],
+      [-46, 14, false],
+      [46, -14, true],
     ] as Array<[number, number, boolean]>) {
       addOilDrum(dx, 0, dz, olive);
     }
 
     const mountedMgs = [
-      addMountedMg('yard-hmg-south', -14, 0, 18.5, 0, true),
-      addMountedMg('yard-hmg-north', 14, 0, -18.5, Math.PI, true),
+      addMountedMg('yard-hmg-south', -16, 0, 29, 0, true),
+      addMountedMg('yard-hmg-north', 16, 0, -29, Math.PI, true),
+    ];
+
+    const vehicles = [
+      addTacticalVehicle('yard-blue-jeep', 'jeep', -38, 0, 54, 0, 'blue'),
+      addTacticalVehicle('yard-blue-tank', 'tank', 38, 0, 54, 0, 'blue'),
+      addTacticalVehicle('yard-red-jeep', 'jeep', 38, 0, -54, Math.PI, 'red'),
+      addTacticalVehicle('yard-red-tank', 'tank', -38, 0, -54, Math.PI, 'red'),
     ];
 
     const pickups = spawnPickups([
-      { id: 'med-west', type: 'health', x: -27, y: 0, z: 0 },
-      { id: 'med-east', type: 'health', x: 27, y: 0, z: 0 },
+      { id: 'med-west', type: 'health', x: -34, y: 0, z: 0 },
+      { id: 'med-east', type: 'health', x: 34, y: 0, z: 0 },
+      { id: 'med-outer-w', type: 'health', x: -60, y: 0, z: 0 },
+      { id: 'med-outer-e', type: 'health', x: 60, y: 0, z: 0 },
       { id: 'ammo-mid', type: 'ammo', x: 0, y: bridgeY, z: 0 },
-      { id: 'ammo-south', type: 'ammo', x: 0, y: 0, z: 22 },
-      { id: 'ammo-north', type: 'ammo', x: 0, y: 0, z: -22 },
+      { id: 'ammo-south', type: 'ammo', x: 0, y: 0, z: 36 },
+      { id: 'ammo-north', type: 'ammo', x: 0, y: 0, z: -36 },
     ]);
 
     return {
@@ -986,63 +1359,74 @@ export function createTacticalArena(
       ramps,
       staticRayMeshes,
       blueSpawns: [
-        new THREE.Vector3(-8, 0, 35),
-        new THREE.Vector3(0, 0, 35.5),
-        new THREE.Vector3(8, 0, 35),
-        new THREE.Vector3(-18, 0, 34),
-        new THREE.Vector3(18, 0, 34),
+        new THREE.Vector3(-12, 0, 60),
+        new THREE.Vector3(-4, 0, 61),
+        new THREE.Vector3(4, 0, 61),
+        new THREE.Vector3(12, 0, 60),
+        new THREE.Vector3(-24, 0, 58),
+        new THREE.Vector3(24, 0, 58),
+        new THREE.Vector3(-44, 0, 59),
+        new THREE.Vector3(44, 0, 59),
+        new THREE.Vector3(-18, 0, 55),
+        new THREE.Vector3(18, 0, 55),
       ],
       redSpawns: [
-        new THREE.Vector3(-8, 0, -35),
-        new THREE.Vector3(0, 0, -35.5),
-        new THREE.Vector3(8, 0, -35),
-        new THREE.Vector3(-18, 0, -34),
-        new THREE.Vector3(18, 0, -34),
+        new THREE.Vector3(-12, 0, -60),
+        new THREE.Vector3(-4, 0, -61),
+        new THREE.Vector3(4, 0, -61),
+        new THREE.Vector3(12, 0, -60),
+        new THREE.Vector3(-24, 0, -58),
+        new THREE.Vector3(24, 0, -58),
+        new THREE.Vector3(-44, 0, -59),
+        new THREE.Vector3(44, 0, -59),
+        new THREE.Vector3(-18, 0, -55),
+        new THREE.Vector3(18, 0, -55),
       ],
       waypoints: [
-        new THREE.Vector3(-29, 0, 24),
-        new THREE.Vector3(-17, 0, 24),
-        new THREE.Vector3(0, 0, 24),
-        new THREE.Vector3(17, 0, 24),
-        new THREE.Vector3(29, 0, 24),
-        new THREE.Vector3(-30, 0, 9),
-        new THREE.Vector3(-18, 0, 8),
-        new THREE.Vector3(0, 0, 11),
-        new THREE.Vector3(18, 0, 8),
-        new THREE.Vector3(30, 0, 9),
-        new THREE.Vector3(-25, 0, 0),
+        new THREE.Vector3(-44, 0, 42),
+        new THREE.Vector3(-20, 0, 40),
+        new THREE.Vector3(0, 0, 40),
+        new THREE.Vector3(20, 0, 40),
+        new THREE.Vector3(44, 0, 42),
+        new THREE.Vector3(-44, 0, 14),
+        new THREE.Vector3(-22, 0, 14),
+        new THREE.Vector3(0, 0, 16),
+        new THREE.Vector3(22, 0, 14),
+        new THREE.Vector3(44, 0, 14),
+        new THREE.Vector3(-42, 0, 0),
         new THREE.Vector3(0, bridgeY, 0),
-        new THREE.Vector3(25, 0, 0),
-        new THREE.Vector3(-30, 0, -9),
-        new THREE.Vector3(-18, 0, -8),
-        new THREE.Vector3(0, 0, -11),
-        new THREE.Vector3(18, 0, -8),
-        new THREE.Vector3(30, 0, -9),
-        new THREE.Vector3(-29, 0, -24),
-        new THREE.Vector3(-17, 0, -24),
-        new THREE.Vector3(0, 0, -24),
-        new THREE.Vector3(17, 0, -24),
-        new THREE.Vector3(29, 0, -24),
+        new THREE.Vector3(42, 0, 0),
+        new THREE.Vector3(-44, 0, -14),
+        new THREE.Vector3(-22, 0, -14),
+        new THREE.Vector3(0, 0, -16),
+        new THREE.Vector3(22, 0, -14),
+        new THREE.Vector3(44, 0, -14),
+        new THREE.Vector3(-44, 0, -42),
+        new THREE.Vector3(-20, 0, -40),
+        new THREE.Vector3(0, 0, -40),
+        new THREE.Vector3(20, 0, -40),
+        new THREE.Vector3(44, 0, -42),
       ],
       pickups,
       mountedMgs,
+      vehicles,
       halfSize,
       disposables: { geometries, materials, textures },
     };
   }
 
   // =========================================================================
-  // MAP 2: DESERT OUTPOST (Arid Canyon FOB, 92x92m, Long-Range Sightlines)
+  // MAP 2: DESERT OUTPOST (Expanded 160x160m Arid Canyon FOB)
   // =========================================================================
   if (mapId === 'outpost') {
-    const halfSize = 46;
+    const halfSize = 80;
     const atmosphere: ArenaAtmosphere = {
       bgColor: 0xc9a984,
       fogColor: 0xd1b38f,
-      fogDensity: 0.0068,
+      fogDensity: 0.0044,
       sunColor: 0xfff3d6,
       sunIntensity: 2.6,
-      sunPos: [45, 52, -26],
+      sunPos: [68, 72, -38],
       hemiSky: 0x93c5fd,
       hemiGround: 0x9c764e,
       hemiIntensity: 1.05,
@@ -1053,6 +1437,9 @@ export function createTacticalArena(
     );
 
     const desertFloor = createDesertFloorTextures(maxAnisotropy);
+    desertFloor.map.repeat.set(30, 30);
+    desertFloor.bumpMap.repeat.set(30, 30);
+    desertFloor.roughnessMap.repeat.set(30, 30);
     const sandstone = createSandstoneTextures(maxAnisotropy);
     const tanContainer = createContainerTextures('#9a8462', '#d97706', maxAnisotropy);
     textures.push(
@@ -1103,7 +1490,7 @@ export function createTacticalArena(
       new THREE.MeshStandardMaterial({ color: 0x8c6343, roughness: 0.92, metalness: 0.04 })
     );
 
-    const outerGround = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(520, 520)), outerSandMat);
+    const outerGround = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(660, 660)), outerSandMat);
     outerGround.rotation.x = -Math.PI / 2;
     outerGround.position.y = -0.04;
     outerGround.receiveShadow = true;
@@ -1119,8 +1506,8 @@ export function createTacticalArena(
     staticRayMeshes.push(mainFloor);
 
     // Perimeter Sandstone Compound Walls
-    const wallH = 5.5;
-    const wallT = 2.4;
+    const wallH = 6.0;
+    const wallT = 2.6;
     addBox(0, wallH / 2, -halfSize - wallT / 2, halfSize * 2 + wallT * 2, wallH, wallT, adobeMat);
     addBox(0, wallH / 2, halfSize + wallT / 2, halfSize * 2 + wallT * 2, wallH, wallT, adobeMat);
     addBox(-halfSize - wallT / 2, wallH / 2, 0, wallT, wallH, halfSize * 2, adobeMat);
@@ -1128,12 +1515,12 @@ export function createTacticalArena(
 
     // Distant Canyon Mesas beyond perimeter
     for (const [mx, mz, mw, mh, md] of [
-      [-85, -75, 42, 26, 32],
-      [75, -80, 48, 32, 34],
-      [-92, 55, 36, 22, 44],
-      [88, 65, 44, 28, 38],
-      [0, -108, 68, 22, 24],
-      [-10, 108, 64, 20, 24],
+      [-125, -110, 52, 34, 38],
+      [115, -115, 58, 38, 42],
+      [-132, 95, 44, 28, 52],
+      [128, 105, 52, 34, 46],
+      [0, -148, 86, 26, 28],
+      [-14, 148, 82, 24, 28],
     ]) {
       const mesa = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(mw, mh, md)), mesaMat);
       mesa.position.set(mx, mh / 2 - 0.1, mz);
@@ -1143,62 +1530,75 @@ export function createTacticalArena(
     // Two Elevated Watchtower Sniper Decks (East & West flanks, y = 3.2m)
     const towerY = 3.2;
     for (const side of [-1, 1]) {
-      const tx = side * 30;
-      addBox(tx, towerY - 0.25, 0, 8, 0.5, 10, adobeMat, true);
-      addBox(tx, (towerY - 0.5) / 2, -4.2, 1.2, towerY - 0.5, 1.2, darkMetalMat, true);
-      addBox(tx, (towerY - 0.5) / 2, 4.2, 1.2, towerY - 0.5, 1.2, darkMetalMat, true);
-      // Chest-high sniper parapets
-      addBox(tx - side * 3.8, towerY + 0.55, 0, 0.4, 1.1, 10, hescoMat, true);
-      addBox(tx, towerY + 0.55, -4.8, 7.6, 1.1, 0.4, hescoMat, true);
-      addBox(tx, towerY + 0.55, 4.8, 7.6, 1.1, 0.4, hescoMat, true);
-      // Walkable ramp up from South/North
-      buildRamp(tx - side * 12, tx - side * 4, 0, 4.4, 0, towerY, hescoMat);
+      const tx = side * 46;
+      addBox(tx, towerY - 0.25, 0, 9, 0.5, 11, adobeMat, true);
+      addBox(tx, (towerY - 0.5) / 2, -4.6, 1.3, towerY - 0.5, 1.3, darkMetalMat, true);
+      addBox(tx, (towerY - 0.5) / 2, 4.6, 1.3, towerY - 0.5, 1.3, darkMetalMat, true);
+      addBox(tx - side * 4.3, towerY + 0.55, 0, 0.4, 1.1, 11, hescoMat, true);
+      addBox(tx, towerY + 0.55, -5.3, 8.6, 1.1, 0.4, hescoMat, true);
+      addBox(tx, towerY + 0.55, 5.3, 8.6, 1.1, 0.4, hescoMat, true);
+      buildRamp(tx - side * 13, tx - side * 4.5, 0, 4.6, 0, towerY, hescoMat);
     }
 
-    // Central Ruined Adobe Courtyard + Low Cover Walls
-    addBox(0, 1.6, 0, 4.5, 3.2, 4.5, adobeMat);
-    addBox(0, 3.3, 0, 4.7, 0.2, 4.7, darkMetalMat, false, false);
-    addBox(-9, 0.9, -9, 6, 1.8, 1.4, hescoMat);
-    addBox(9, 0.9, -9, 6, 1.8, 1.4, hescoMat);
-    addBox(-9, 0.9, 9, 6, 1.8, 1.4, hescoMat);
-    addBox(9, 0.9, 9, 6, 1.8, 1.4, hescoMat);
+    // Central Ruined Adobe Courtyard + Outer Tactical Bunkers
+    addBox(0, 1.8, 0, 5.5, 3.6, 5.5, adobeMat);
+    addBox(0, 3.7, 0, 5.7, 0.22, 5.7, darkMetalMat, false, false);
+    addBox(-13, 0.9, -13, 7, 1.8, 1.5, hescoMat);
+    addBox(13, 0.9, -13, 7, 1.8, 1.5, hescoMat);
+    addBox(-13, 0.9, 13, 7, 1.8, 1.5, hescoMat);
+    addBox(13, 0.9, 13, 7, 1.8, 1.5, hescoMat);
 
     // Base Spawn Bunkers (Blue South, Red North)
-    addBox(-12, 1.6, 33, 9, 3.2, 3.5, crateMat);
-    addBox(12, 1.6, 33, 9, 3.2, 3.5, crateMat);
-    addBox(0, 1.1, 35, 7, 2.2, 1.6, hescoMat);
-    addBox(0, 2.28, 35, 7.1, 0.14, 1.65, accentBlueMat, false, false);
+    addBox(-16, 1.6, 56, 10, 3.2, 3.6, crateMat);
+    addBox(16, 1.6, 56, 10, 3.2, 3.6, crateMat);
+    addBox(0, 1.1, 59, 8.5, 2.2, 1.8, hescoMat);
+    addBox(0, 2.28, 59, 8.6, 0.14, 1.85, accentBlueMat, false, false);
 
-    addBox(-12, 1.6, -33, 9, 3.2, 3.5, crateMat);
-    addBox(12, 1.6, -33, 9, 3.2, 3.5, crateMat);
-    addBox(0, 1.1, -35, 7, 2.2, 1.6, hescoMat);
-    addBox(0, 2.28, -35, 7.1, 0.14, 1.65, accentRedMat, false, false);
+    addBox(-16, 1.6, -56, 10, 3.2, 3.6, crateMat);
+    addBox(16, 1.6, -56, 10, 3.2, 3.6, crateMat);
+    addBox(0, 1.1, -59, 8.5, 2.2, 1.8, hescoMat);
+    addBox(0, 2.28, -59, 8.6, 0.14, 1.85, accentRedMat, false, false);
 
-    // Mid-Field Supply Containers & HESCO Sandbags
-    addBox(-18, 1.5, -20, 7, 3.0, 3.0, crateMat);
-    addBox(18, 1.5, -20, 7, 3.0, 3.0, crateMat);
-    addBox(-18, 1.5, 20, 7, 3.0, 3.0, crateMat);
-    addBox(18, 1.5, 20, 7, 3.0, 3.0, crateMat);
+    // Mid-Field & Outer Canyon Supply Containers
+    addBox(-24, 1.5, -34, 8, 3.0, 3.2, crateMat);
+    addBox(24, 1.5, -34, 8, 3.0, 3.2, crateMat);
+    addBox(-24, 1.5, 34, 8, 3.0, 3.2, crateMat);
+    addBox(24, 1.5, 34, 8, 3.0, 3.2, crateMat);
+    addBox(-62, 1.6, -24, 3.6, 3.2, 8.5, adobeMat);
+    addBox(-62, 1.6, 24, 3.6, 3.2, 8.5, adobeMat);
+    addBox(62, 1.6, -24, 3.6, 3.2, 8.5, adobeMat);
+    addBox(62, 1.6, 24, 3.6, 3.2, 8.5, adobeMat);
 
     for (const [dx, dz, olive] of [
-      [-14, 15, true],
-      [14, -15, false],
-      [-5, 6, true],
-      [5, -6, true],
+      [-18, 22, true],
+      [18, -22, false],
+      [-7, 8, true],
+      [7, -8, true],
+      [-52, 14, false],
+      [52, -14, true],
     ] as Array<[number, number, boolean]>) {
       addOilDrum(dx, 0, dz, olive);
     }
 
     const mountedMgs = [
-      addMountedMg('outpost-hmg-west', -27.2, towerY, 0, -Math.PI / 2, false),
-      addMountedMg('outpost-hmg-east', 27.2, towerY, 0, Math.PI / 2, false),
+      addMountedMg('outpost-hmg-west', -42.6, towerY, 0, -Math.PI / 2, false),
+      addMountedMg('outpost-hmg-east', 42.6, towerY, 0, Math.PI / 2, false),
+    ];
+
+    const vehicles = [
+      addTacticalVehicle('outpost-blue-jeep', 'jeep', -44, 0, 62, 0, 'blue'),
+      addTacticalVehicle('outpost-blue-tank', 'tank', 44, 0, 62, 0, 'blue'),
+      addTacticalVehicle('outpost-red-jeep', 'jeep', 44, 0, -62, Math.PI, 'red'),
+      addTacticalVehicle('outpost-red-tank', 'tank', -44, 0, -62, Math.PI, 'red'),
     ];
 
     const pickups = spawnPickups([
-      { id: 'med-west-tower', type: 'health', x: -30, y: towerY, z: 2.6 },
-      { id: 'med-east-tower', type: 'health', x: 30, y: towerY, z: -2.6 },
-      { id: 'ammo-center-n', type: 'ammo', x: 0, y: 0, z: -7 },
-      { id: 'ammo-center-s', type: 'ammo', x: 0, y: 0, z: 7 },
+      { id: 'med-west-tower', type: 'health', x: -46, y: towerY, z: 3.0 },
+      { id: 'med-east-tower', type: 'health', x: 46, y: towerY, z: -3.0 },
+      { id: 'med-west-flank', type: 'health', x: -68, y: 0, z: 0 },
+      { id: 'med-east-flank', type: 'health', x: 68, y: 0, z: 0 },
+      { id: 'ammo-center-n', type: 'ammo', x: 0, y: 0, z: -10 },
+      { id: 'ammo-center-s', type: 'ammo', x: 0, y: 0, z: 10 },
     ]);
 
     return {
@@ -1209,53 +1609,64 @@ export function createTacticalArena(
       ramps,
       staticRayMeshes,
       blueSpawns: [
-        new THREE.Vector3(-9, 0, 40),
-        new THREE.Vector3(0, 0, 40.5),
-        new THREE.Vector3(9, 0, 40),
-        new THREE.Vector3(-21, 0, 39),
-        new THREE.Vector3(21, 0, 39),
+        new THREE.Vector3(-12, 0, 68),
+        new THREE.Vector3(-4, 0, 69),
+        new THREE.Vector3(4, 0, 69),
+        new THREE.Vector3(12, 0, 68),
+        new THREE.Vector3(-26, 0, 66),
+        new THREE.Vector3(26, 0, 66),
+        new THREE.Vector3(-52, 0, 68),
+        new THREE.Vector3(52, 0, 68),
+        new THREE.Vector3(-20, 0, 62),
+        new THREE.Vector3(20, 0, 62),
       ],
       redSpawns: [
-        new THREE.Vector3(-9, 0, -40),
-        new THREE.Vector3(0, 0, -40.5),
-        new THREE.Vector3(9, 0, -40),
-        new THREE.Vector3(-21, 0, -39),
-        new THREE.Vector3(21, 0, -39),
+        new THREE.Vector3(-12, 0, -68),
+        new THREE.Vector3(-4, 0, -69),
+        new THREE.Vector3(4, 0, -69),
+        new THREE.Vector3(12, 0, -68),
+        new THREE.Vector3(-26, 0, -66),
+        new THREE.Vector3(26, 0, -66),
+        new THREE.Vector3(-52, 0, -68),
+        new THREE.Vector3(52, 0, -68),
+        new THREE.Vector3(-20, 0, -62),
+        new THREE.Vector3(20, 0, -62),
       ],
       waypoints: [
-        new THREE.Vector3(-34, 0, 28),
-        new THREE.Vector3(-12, 0, 26),
-        new THREE.Vector3(12, 0, 26),
-        new THREE.Vector3(34, 0, 28),
-        new THREE.Vector3(-30, towerY, 0),
-        new THREE.Vector3(-14, 0, 0),
-        new THREE.Vector3(14, 0, 0),
-        new THREE.Vector3(30, towerY, 0),
-        new THREE.Vector3(0, 0, 14),
-        new THREE.Vector3(0, 0, -14),
-        new THREE.Vector3(-34, 0, -28),
-        new THREE.Vector3(-12, 0, -26),
-        new THREE.Vector3(12, 0, -26),
-        new THREE.Vector3(34, 0, -28),
+        new THREE.Vector3(-54, 0, 46),
+        new THREE.Vector3(-18, 0, 44),
+        new THREE.Vector3(18, 0, 44),
+        new THREE.Vector3(54, 0, 46),
+        new THREE.Vector3(-46, towerY, 0),
+        new THREE.Vector3(-24, 0, 0),
+        new THREE.Vector3(24, 0, 0),
+        new THREE.Vector3(46, towerY, 0),
+        new THREE.Vector3(0, 0, 22),
+        new THREE.Vector3(0, 0, -22),
+        new THREE.Vector3(-54, 0, -46),
+        new THREE.Vector3(-18, 0, -44),
+        new THREE.Vector3(18, 0, -44),
+        new THREE.Vector3(54, 0, -46),
       ],
       pickups,
       mountedMgs,
+      vehicles,
       halfSize,
       disposables: { geometries, materials, textures },
     };
   }
 
   // =========================================================================
-  // MAP 3: CRYO BUNKER (Subterranean CQB Facility, 68x68m)
+  // MAP 3: CRYO BUNKER (Expanded 120x120m Subterranean Facility + Armor Lanes)
   // =========================================================================
-  const halfSize = 34;
+  const halfSize = 60;
   const atmosphere: ArenaAtmosphere = {
     bgColor: 0x0b121e,
     fogColor: 0x0d1624,
-    fogDensity: 0.013,
+    fogDensity: 0.0075,
     sunColor: 0xdbeafe,
     sunIntensity: 1.9,
-    sunPos: [18, 48, 16],
+    sunPos: [28, 60, 24],
     hemiSky: 0x38bdf8,
     hemiGround: 0x111827,
     hemiIntensity: 1.1,
@@ -1266,6 +1677,9 @@ export function createTacticalArena(
   );
 
   const bunkerFloor = createBunkerFloorTextures(maxAnisotropy);
+  bunkerFloor.map.repeat.set(26, 26);
+  bunkerFloor.bumpMap.repeat.set(26, 26);
+  bunkerFloor.roughnessMap.repeat.set(26, 26);
   const wallTex = createConcreteWallTextures(maxAnisotropy);
   const cryoRackTex = createContainerTextures('#1b2638', '#06b6d4', maxAnisotropy);
   const deckTex = createSteelDeckTextures(maxAnisotropy);
@@ -1331,7 +1745,7 @@ export function createTacticalArena(
     })
   );
 
-  const outerGround = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(400, 400)), outerGroundMat);
+  const outerGround = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(520, 520)), outerGroundMat);
   outerGround.rotation.x = -Math.PI / 2;
   outerGround.position.y = -0.04;
   rootGroup.add(outerGround);
@@ -1346,86 +1760,97 @@ export function createTacticalArena(
   staticRayMeshes.push(mainFloor);
 
   // Bunker Concrete Perimeter Walls + Overhead Skylight Steel Trusses
-  const wallH = 8.0;
-  const wallT = 2.0;
+  const wallH = 9.0;
+  const wallT = 2.4;
   addBox(0, wallH / 2, -halfSize - wallT / 2, halfSize * 2 + wallT * 2, wallH, wallT, wallMat);
   addBox(0, wallH / 2, halfSize + wallT / 2, halfSize * 2 + wallT * 2, wallH, wallT, wallMat);
   addBox(-halfSize - wallT / 2, wallH / 2, 0, wallT, wallH, halfSize * 2, wallMat);
   addBox(halfSize + wallT / 2, wallH / 2, 0, wallT, wallH, halfSize * 2, wallMat);
 
-  // Overhead Industrial Ceiling Girders & Light Strips (non-colliding high architecture)
-  for (const gz of [-20, 0, 20]) {
-    addBox(0, 8.2, gz, halfSize * 2, 0.8, 1.2, darkMetalMat, false, false);
-    addBox(0, 7.75, gz, 46, 0.14, 0.45, cyanNeonMat, false, false);
+  for (const gz of [-40, -20, 0, 20, 40]) {
+    addBox(0, 9.2, gz, halfSize * 2, 0.9, 1.3, darkMetalMat, false, false);
+    addBox(0, 8.7, gz, 88, 0.16, 0.5, cyanNeonMat, false, false);
   }
 
-  // Central Elevated Reactor Ring Platform (y = 2.4m) with 4 Ramps (N/S/E/W)
+  // Central Elevated Reactor Ring Platform (y = 2.4m) with 4 Ramps
   const platY = 2.4;
-  addBox(0, platY - 0.25, 0, 14, 0.5, 14, deckMat, true);
-  // Central Glowing Cryo Core Pillar
-  const core = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(1.6, 1.8, 7.6, 16)), darkMetalMat);
-  core.position.set(0, 3.8, 0);
+  addBox(0, platY - 0.25, 0, 18, 0.5, 18, deckMat, true);
+  const core = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(1.9, 2.1, 8.6, 16)), darkMetalMat);
+  core.position.set(0, 4.3, 0);
   core.castShadow = true;
   rootGroup.add(core);
   staticRayMeshes.push(core);
-  colliders.push({ minX: -1.8, maxX: 1.8, minY: 0, maxY: 7.6, minZ: -1.8, maxZ: 1.8 });
+  colliders.push({ minX: -2.1, maxX: 2.1, minY: 0, maxY: 8.6, minZ: -2.1, maxZ: 2.1 });
 
-  const coreRing = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(1.88, 1.88, 0.35, 16)), cyanNeonMat);
-  coreRing.position.set(0, platY + 1.6, 0);
+  const coreRing = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(2.2, 2.2, 0.4, 16)), cyanNeonMat);
+  coreRing.position.set(0, platY + 1.8, 0);
   rootGroup.add(coreRing);
 
   const coreHaloMat = trackMat(
     new THREE.SpriteMaterial({
       map: cyanGlowTex,
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.72,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     })
   );
   const coreHalo = new THREE.Sprite(coreHaloMat);
-  coreHalo.scale.set(11, 11, 1);
-  coreHalo.position.set(0, platY + 1.6, 0);
+  coreHalo.scale.set(14, 14, 1);
+  coreHalo.position.set(0, platY + 1.8, 0);
   rootGroup.add(coreHalo);
 
-  buildRamp(-14, -7, 0, 4.4, 0, platY, deckMat);
-  buildRamp(14, 7, 0, 4.4, 0, platY, deckMat);
-  buildZRamp(0, 4.4, -14, -7, 0, platY, deckMat);
-  buildZRamp(0, 4.4, 14, 7, 0, platY, deckMat);
+  buildRamp(-17, -9, 0, 5.0, 0, platY, deckMat);
+  buildRamp(17, 9, 0, 5.0, 0, platY, deckMat);
+  buildZRamp(0, 5.0, -17, -9, 0, platY, deckMat);
+  buildZRamp(0, 5.0, 17, 9, 0, platY, deckMat);
 
-  // CQB Containment Server Racks & Corridor Partitions
+  // Expanded Containment Server Racks & Corridor Partitions (wide outer vehicle corridors at ±36..±55)
   for (const [rx, rz, rw, rd] of [
-    [-19, -15, 3.2, 8.5],
-    [19, -15, 3.2, 8.5],
-    [-19, 15, 3.2, 8.5],
-    [19, 15, 3.2, 8.5],
-    [-26, 0, 5.5, 2.8],
-    [26, 0, 5.5, 2.8],
-    [-10, 22, 6.5, 2.2],
-    [10, 22, 6.5, 2.2],
-    [-10, -22, 6.5, 2.2],
-    [10, -22, 6.5, 2.2],
+    [-25, -22, 3.4, 9.5],
+    [25, -22, 3.4, 9.5],
+    [-25, 22, 3.4, 9.5],
+    [25, 22, 3.4, 9.5],
+    [-46, -16, 3.4, 9.5],
+    [46, -16, 3.4, 9.5],
+    [-46, 16, 3.4, 9.5],
+    [46, 16, 3.4, 9.5],
+    [-33, 0, 6.0, 3.2],
+    [33, 0, 6.0, 3.2],
+    [-14, 34, 7.5, 2.4],
+    [14, 34, 7.5, 2.4],
+    [-14, -34, 7.5, 2.4],
+    [14, -34, 7.5, 2.4],
   ]) {
-    addBox(rx, 1.65, rz, rw, 3.3, rd, rackMat);
+    addBox(rx, 1.7, rz, rw, 3.4, rd, rackMat);
   }
 
   // Team Spawn Base Shields
-  addBox(0, 1.1, 26, 5.5, 2.2, 1.4, darkMetalMat);
-  addBox(0, 2.25, 26, 5.6, 0.14, 1.45, accentBlueMat, false, false);
+  addBox(0, 1.1, 44, 7.5, 2.2, 1.6, darkMetalMat);
+  addBox(0, 2.25, 44, 7.6, 0.14, 1.65, accentBlueMat, false, false);
 
-  addBox(0, 1.1, -26, 5.5, 2.2, 1.4, darkMetalMat);
-  addBox(0, 2.25, -26, 5.6, 0.14, 1.45, accentRedMat, false, false);
+  addBox(0, 1.1, -44, 7.5, 2.2, 1.6, darkMetalMat);
+  addBox(0, 2.25, -44, 7.6, 0.14, 1.65, accentRedMat, false, false);
 
   const mountedMgs = [
-    addMountedMg('bunker-hmg-south', -4.5, platY, 4.2, Math.PI, true),
-    addMountedMg('bunker-hmg-north', 4.5, platY, -4.2, 0, true),
+    addMountedMg('bunker-hmg-south', -6.0, platY, 5.8, Math.PI, true),
+    addMountedMg('bunker-hmg-north', 6.0, platY, -5.8, 0, true),
+  ];
+
+  const vehicles = [
+    addTacticalVehicle('bunker-blue-jeep', 'jeep', -36, 0, 48, 0, 'blue'),
+    addTacticalVehicle('bunker-blue-tank', 'tank', 36, 0, 48, 0, 'blue'),
+    addTacticalVehicle('bunker-red-jeep', 'jeep', 36, 0, -48, Math.PI, 'red'),
+    addTacticalVehicle('bunker-red-tank', 'tank', -36, 0, -48, Math.PI, 'red'),
   ];
 
   const pickups = spawnPickups([
-    { id: 'med-west', type: 'health', x: -24, y: 0, z: 0 },
-    { id: 'med-east', type: 'health', x: 24, y: 0, z: 0 },
-    { id: 'ammo-north', type: 'ammo', x: 0, y: platY, z: -4.5 },
-    { id: 'ammo-south', type: 'ammo', x: 0, y: platY, z: 4.5 },
+    { id: 'med-west', type: 'health', x: -40, y: 0, z: 0 },
+    { id: 'med-east', type: 'health', x: 40, y: 0, z: 0 },
+    { id: 'med-w-outer', type: 'health', x: -54, y: 0, z: 0 },
+    { id: 'med-e-outer', type: 'health', x: 54, y: 0, z: 0 },
+    { id: 'ammo-north', type: 'ammo', x: 0, y: platY, z: -6.2 },
+    { id: 'ammo-south', type: 'ammo', x: 0, y: platY, z: 6.2 },
   ]);
 
   return {
@@ -1436,41 +1861,54 @@ export function createTacticalArena(
     ramps,
     staticRayMeshes,
     blueSpawns: [
-      new THREE.Vector3(-7, 0, 30),
-      new THREE.Vector3(0, 0, 30.5),
-      new THREE.Vector3(7, 0, 30),
-      new THREE.Vector3(-16, 0, 29),
-      new THREE.Vector3(16, 0, 29),
+      new THREE.Vector3(-10, 0, 52),
+      new THREE.Vector3(-3, 0, 53),
+      new THREE.Vector3(3, 0, 53),
+      new THREE.Vector3(10, 0, 52),
+      new THREE.Vector3(-22, 0, 50),
+      new THREE.Vector3(22, 0, 50),
+      new THREE.Vector3(-46, 0, 52),
+      new THREE.Vector3(46, 0, 52),
+      new THREE.Vector3(-16, 0, 47),
+      new THREE.Vector3(16, 0, 47),
     ],
     redSpawns: [
-      new THREE.Vector3(-7, 0, -30),
-      new THREE.Vector3(0, 0, -30.5),
-      new THREE.Vector3(7, 0, -30),
-      new THREE.Vector3(-16, 0, -29),
-      new THREE.Vector3(16, 0, -29),
+      new THREE.Vector3(-10, 0, -52),
+      new THREE.Vector3(-3, 0, -53),
+      new THREE.Vector3(3, 0, -53),
+      new THREE.Vector3(10, 0, -52),
+      new THREE.Vector3(-22, 0, -50),
+      new THREE.Vector3(22, 0, -50),
+      new THREE.Vector3(-46, 0, -52),
+      new THREE.Vector3(46, 0, -52),
+      new THREE.Vector3(-16, 0, -47),
+      new THREE.Vector3(16, 0, -47),
     ],
     waypoints: [
-      new THREE.Vector3(-26, 0, 22),
-      new THREE.Vector3(0, 0, 20),
-      new THREE.Vector3(26, 0, 22),
-      new THREE.Vector3(-25, 0, 9),
-      new THREE.Vector3(-14, 0, 10),
-      new THREE.Vector3(14, 0, 10),
-      new THREE.Vector3(25, 0, 9),
-      new THREE.Vector3(-16, 0, 0),
-      new THREE.Vector3(-4.5, platY, 0),
-      new THREE.Vector3(4.5, platY, 0),
-      new THREE.Vector3(16, 0, 0),
-      new THREE.Vector3(-25, 0, -9),
-      new THREE.Vector3(-14, 0, -10),
-      new THREE.Vector3(14, 0, -10),
-      new THREE.Vector3(25, 0, -9),
-      new THREE.Vector3(-26, 0, -22),
-      new THREE.Vector3(0, 0, -20),
-      new THREE.Vector3(26, 0, -22),
+      new THREE.Vector3(-40, 0, 36),
+      new THREE.Vector3(-16, 0, 34),
+      new THREE.Vector3(16, 0, 34),
+      new THREE.Vector3(40, 0, 36),
+      new THREE.Vector3(-36, 0, 14),
+      new THREE.Vector3(-18, 0, 14),
+      new THREE.Vector3(18, 0, 14),
+      new THREE.Vector3(36, 0, 14),
+      new THREE.Vector3(-22, 0, 0),
+      new THREE.Vector3(-6.0, platY, 0),
+      new THREE.Vector3(6.0, platY, 0),
+      new THREE.Vector3(22, 0, 0),
+      new THREE.Vector3(-36, 0, -14),
+      new THREE.Vector3(-18, 0, -14),
+      new THREE.Vector3(18, 0, -14),
+      new THREE.Vector3(36, 0, -14),
+      new THREE.Vector3(-40, 0, -36),
+      new THREE.Vector3(-16, 0, -34),
+      new THREE.Vector3(16, 0, -34),
+      new THREE.Vector3(40, 0, -36),
     ],
     pickups,
     mountedMgs,
+    vehicles,
     halfSize,
     disposables: { geometries, materials, textures },
   };

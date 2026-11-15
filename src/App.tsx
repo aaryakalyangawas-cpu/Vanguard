@@ -12,12 +12,12 @@ import { HudSnapshot, MatchConfig } from './game/types';
 import { MAPS } from './game/arena';
 import { WEAPONS } from './game/weapons';
 
-const CONFIG_STORAGE_KEY = 'vanguard_arena_config_v1';
+const CONFIG_STORAGE_KEY = 'vanguard_arena_config_v2';
 
 const DEFAULT_CONFIG: MatchConfig = {
   mapId: 'yard',
-  teamSize: 4,
-  scoreLimit: 25,
+  teamSize: 10,
+  scoreLimit: 50,
   difficulty: 'tactical',
   startingWeapon: 'm4a1',
   sensitivity: 1.0,
@@ -35,6 +35,12 @@ function loadInitialConfig(): MatchConfig {
     }
     if (!MAPS[merged.mapId]) {
       merged.mapId = 'yard';
+    }
+    if (merged.teamSize !== 4 && merged.teamSize !== 6 && merged.teamSize !== 10) {
+      merged.teamSize = 10;
+    }
+    if (merged.scoreLimit !== 25 && merged.scoreLimit !== 50 && merged.scoreLimit !== 75) {
+      merged.scoreLimit = 50;
     }
     return merged;
   } catch {

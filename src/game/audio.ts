@@ -267,6 +267,46 @@ class SoundEngine {
     sub.stop(now + 0.5);
   }
 
+  public playCannonFire() {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.noiseBuffer) return;
+    const now = ctx.currentTime;
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = this.noiseBuffer;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1900, now);
+    lp.frequency.exponentialRampToValueAtTime(110, now + 0.55);
+    const nGain = ctx.createGain();
+    nGain.gain.setValueAtTime(0.85, now);
+    nGain.gain.exponentialRampToValueAtTime(0.008, now + 0.58);
+    noise.connect(lp);
+    lp.connect(nGain);
+    nGain.connect(ctx.destination);
+    noise.start(now);
+    noise.stop(now + 0.6);
+
+    const osc = ctx.createOscillator();
+    const oGain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(125, now);
+    osc.frequency.exponentialRampToValueAtTime(28, now + 0.35);
+    oGain.gain.setValueAtTime(0.65, now);
+    oGain.gain.exponentialRampToValueAtTime(0.006, now + 0.38);
+    osc.connect(oGain);
+    oGain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.4);
+  }
+
+  public playVehicleMount(entering: boolean) {
+    this.playMechanicalClick(entering ? 320 : 240, 0.06);
+    if (entering) {
+      window.setTimeout(() => this.playMechanicalClick(140, 0.12), 70);
+    }
+  }
+
   public playPinPull() {
     this.playMechanicalClick(920, 0.035);
     window.setTimeout(() => this.playMechanicalClick(1280, 0.025), 55);

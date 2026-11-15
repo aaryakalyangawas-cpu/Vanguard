@@ -1,5 +1,5 @@
-import React from 'react';
-import { Crosshair, MapPin, Play, RotateCcw, Shield, Volume2, VolumeX } from 'lucide-react';
+import React, { useState } from 'react';
+import { Code2, Crosshair, Info, MapPin, Play, RotateCcw, Shield, Volume2, VolumeX } from 'lucide-react';
 import { MAP_ORDER, MAPS } from '../game/arena';
 import { Difficulty, HudSnapshot, MapId, MatchConfig, WeaponId } from '../game/types';
 import { WEAPON_ORDER, WEAPONS } from '../game/weapons';
@@ -22,6 +22,8 @@ export const GameMenus: React.FC<GameMenusProps> = ({
   onResumeMatch,
   onReturnToLobby,
 }) => {
+  const [lobbyTab, setLobbyTab] = useState<'play' | 'about'>('play');
+
   if (hud.phase === 'lobby') {
     return (
       <div className="fixed inset-0 z-20 flex items-start justify-center p-4 sm:p-5 bg-[#070a10]/62 overflow-y-auto">
@@ -33,10 +35,36 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                 Vanguard Arena
               </h1>
               <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                Browser 3D Team Deathmatch · 3 Maps · 7 Weapons + RPG-7 · Fixed .50 Cal HMGs · Frag Grenades
+                Browser 3D Team Deathmatch · Up to 10v10 · Armored Vehicles · 7 Weapons + RPG-7 · .50 Cal HMGs
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex items-center rounded-lg bg-[#121824] border border-slate-800 p-1">
+                <button
+                  type="button"
+                  onClick={() => setLobbyTab('play')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    lobbyTab === 'play'
+                      ? 'bg-slate-800 text-white'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
+                  Loadout
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLobbyTab('about')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    lobbyTab === 'about'
+                      ? 'bg-slate-800 text-white'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Info className="w-3.5 h-3.5" />
+                  About
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => onUpdateConfig({ muted: !config.muted })}
@@ -56,7 +84,80 @@ export const GameMenus: React.FC<GameMenusProps> = ({
             </div>
           </div>
 
-          {/* Map Selection Strip */}
+          {lobbyTab === 'about' ? (
+            <div className="space-y-5 py-2">
+              <div className="rounded-lg bg-[#121824] border border-slate-800 p-5">
+                <div className="flex items-center gap-2 text-amber-400 text-xs font-mono uppercase tracking-wider mb-2">
+                  <Code2 className="w-4 h-4" />
+                  Development Team
+                </div>
+                <h2 className="font-display text-xl font-bold text-white mb-1">
+                  Created by VictorTheGreat &amp; Williamson22
+                </h2>
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  Vanguard Arena is developed by <span className="text-slate-100 font-semibold">VictorTheGreat</span> and{' '}
+                  <span className="text-slate-100 font-semibold">Williamson22</span> as a fast, lightweight browser-based
+                  3D tactical Team Deathmatch shooter.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                  <div className="rounded-lg bg-[#0d121c] border border-slate-800 p-4">
+                    <div className="font-display text-base font-bold text-white">VictorTheGreat</div>
+                    <div className="text-xs text-amber-400 mt-0.5">Developer</div>
+                  </div>
+                  <div className="rounded-lg bg-[#0d121c] border border-slate-800 p-4">
+                    <div className="font-display text-base font-bold text-white">Williamson22</div>
+                    <div className="text-xs text-amber-400 mt-0.5">Developer</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="rounded-lg bg-[#121824] border border-slate-800 p-5">
+                  <h3 className="font-display text-sm font-semibold text-slate-100 mb-2">
+                    Combat Systems
+                  </h3>
+                  <ul className="text-xs text-slate-400 space-y-1.5 leading-relaxed">
+                    <li>Simulated ballistics with per-caliber velocity, gravity drop, and surface decals</li>
+                    <li>7 selectable weapons including scoped DMR, bolt-action sniper, and RPG-7V2 launcher</li>
+                    <li>Drivable Tactical 4×4 Recon (.50 Cal MG) and Striker Armored IFV (105mm Cannon)</li>
+                    <li>Cookable M67 frag grenades &amp; mounted .50 Cal M2HB turrets with thermal barrel heat</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-lg bg-[#121824] border border-slate-800 p-5 flex flex-col justify-between gap-4">
+                  <div>
+                    <h3 className="font-display text-sm font-semibold text-slate-100 mb-2">
+                      Arenas &amp; 10v10 Warfare
+                    </h3>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Battle up to 10v10 across expanded Industrial Yard (140×140m), Desert Outpost (160×160m),
+                      and Cryo Bunker (120×120m) maps with vehicles, optical scopes, and tactical radar.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setLobbyTab('play')}
+                      className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
+                    >
+                      Configure Loadout
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onStartMatch}
+                      className="flex items-center gap-2 px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs transition-colors cursor-pointer"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      Deploy to Match
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Map Selection Strip */}
           <div className="mb-4">
             <div className="flex items-baseline justify-between mb-2.5">
               <h2 className="font-display text-base font-semibold text-slate-100">
@@ -168,7 +269,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                 <div>
                   <div className="text-xs text-slate-400 mb-1.5">Squad Size</div>
                   <div className="grid grid-cols-3 gap-2">
-                    {([3, 4, 5] as const).map((sz) => (
+                    {([4, 6, 10] as const).map((sz) => (
                       <button
                         key={sz}
                         type="button"
@@ -188,7 +289,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                 <div>
                   <div className="text-xs text-slate-400 mb-1.5">Elimination Target</div>
                   <div className="grid grid-cols-3 gap-2">
-                    {([15, 25, 40] as const).map((lim) => (
+                    {([25, 50, 75] as const).map((lim) => (
                       <button
                         key={lim}
                         type="button"
@@ -268,8 +369,12 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                   <span className="font-mono text-slate-300">G</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Mount / Dismount .50 Cal HMG</span>
-                  <span className="font-mono text-slate-300">E</span>
+                  <span>Enter Vehicle / Mount .50 Cal</span>
+                  <span className="font-mono text-slate-300">E (Enter / Exit)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Drive / Handbrake / Turret Fire</span>
+                  <span className="font-mono text-slate-300">WASD · Space · LMB</span>
                 </div>
               </div>
 
@@ -283,6 +388,8 @@ export const GameMenus: React.FC<GameMenusProps> = ({
               </button>
             </div>
           </div>
+            </>
+          )}
         </div>
       </div>
     );

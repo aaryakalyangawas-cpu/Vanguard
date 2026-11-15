@@ -51,10 +51,12 @@ export interface WeaponRuntimeState {
   reserve: number;
 }
 
+export type VehicleType = 'jeep' | 'tank';
+
 export interface MatchConfig {
   mapId: MapId;
-  teamSize: 3 | 4 | 5;
-  scoreLimit: 15 | 25 | 40;
+  teamSize: 4 | 6 | 10;
+  scoreLimit: 25 | 50 | 75;
   difficulty: Difficulty;
   startingWeapon: WeaponId;
   sensitivity: number; // 0.3 to 2.5
@@ -94,7 +96,7 @@ export interface DamageDirectionIndicator {
 export interface RadarBlip {
   x: number;
   z: number;
-  team: TeamId | 'pickup_health' | 'pickup_ammo' | 'turret';
+  team: TeamId | 'pickup_health' | 'pickup_ammo' | 'turret' | 'vehicle';
   alive?: boolean;
 }
 
@@ -138,5 +140,15 @@ export interface HudSnapshot {
     heat: number;
     overheated: boolean;
     nearPrompt: boolean;
+  };
+  vehicle: {
+    active: boolean;
+    type: VehicleType | null;
+    name: string;
+    health: number;
+    maxHealth: number;
+    speedKmh: number;
+    weaponCooldownPct: number;
+    nearPromptName: string | null;
   };
 }
