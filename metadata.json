@@ -1,0 +1,6 @@
+{
+  "name": "Vanguard Arena",
+  "description": "Lightweight browser-based 3D First-Person Shooter featuring Team Deathmatch and four distinct tactical weapons.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
