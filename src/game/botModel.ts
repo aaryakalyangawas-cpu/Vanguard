@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TeamId, WeaponId } from './types';
+import { WEAPONS } from './weapons';
 
 export interface CombatantRig {
   root: THREE.Group;
@@ -10,6 +11,7 @@ export interface CombatantRig {
   rightArm: THREE.Group;
   muzzleWorldAnchor: THREE.Object3D;
   hitMeshes: THREE.Object3D[];
+  nameSprite?: THREE.Sprite;
 }
 
 function createContactShadowTexture(): THREE.CanvasTexture {
@@ -26,12 +28,41 @@ function createContactShadowTexture(): THREE.CanvasTexture {
   return new THREE.CanvasTexture(canvas);
 }
 
+function createNameplateTexture(label: string, team: TeamId, isHuman: boolean): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.clearRect(0, 0, 256, 64);
+  ctx.fillStyle = 'rgba(10, 14, 22, 0.82)';
+  ctx.beginPath();
+  ctx.roundRect(12, 12, 232, 40, 8);
+  ctx.fill();
+
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = team === 'blue' ? '#3b82f6' : '#ef4444';
+  ctx.stroke();
+
+  ctx.font = 'bold 20px "Plus Jakarta Sans", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = isHuman ? '#fbbf24' : '#f8fafc';
+  ctx.fillText(label.slice(0, 18), 128, 32);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
 let sharedShadowTex: THREE.CanvasTexture | null = null;
 
 export function buildCombatantRig(
   combatantId: string,
   team: TeamId,
-  weaponId: WeaponId
+  weaponId: WeaponId,
+  displayName?: string,
+  isHuman = false
 ): CombatantRig {
   const root = new THREE.Group();
   const bodyPivot = new THREE.Group();
@@ -41,7 +72,6 @@ export function buildCombatantRig(
     sharedShadowTex = createContactShadowTexture();
   }
 
-  // Grounded contact shadow disc beneath feet
   const contactShadow = new THREE.Mesh(
     new THREE.PlaneGeometry(1.15, 1.15),
     new THREE.MeshBasicMaterial({
@@ -60,21 +90,9 @@ export function buildCombatantRig(
   const trimColor = isBlue ? 0x3b82f6 : 0xef4444;
   const bduColor = isBlue ? 0x1f2937 : 0x262124;
 
-  const armorMat = new THREE.MeshStandardMaterial({
-    color: armorColor,
-    metalness: 0.35,
-    roughness: 0.48,
-  });
-  const suitMat = new THREE.MeshStandardMaterial({
-    color: bduColor,
-    metalness: 0.08,
-    roughness: 0.84,
-  });
-  const pouchMat = new THREE.MeshStandardMaterial({
-    color: 0x171c23,
-    metalness: 0.12,
-    roughness: 0.78,
-  });
+  const armorMat = new THREE.MeshStandardMaterial({ color: armorColor, metalness: 0.35, roughness: 0.48 });
+  const suitMat = new THREE.MeshStandardMaterial({ color: bduColor, metalness: 0.08, roughness: 0.84 });
+  const pouchMat = new THREE.MeshStandardMaterial({ color: 0x171c23, metalness: 0.12, roughness: 0.78 });
   const trimMat = new THREE.MeshStandardMaterial({
     color: trimColor,
     metalness: 0.55,
@@ -89,11 +107,7 @@ export function buildCombatantRig(
     emissive: isBlue ? 0x0284c7 : 0xea580c,
     emissiveIntensity: 0.75,
   });
-  const gunMat = new THREE.MeshStandardMaterial({
-    color: 0x1b222c,
-    metalness: 0.85,
-    roughness: 0.28,
-  });
+  const gunMat = new THREE.MeshStandardMaterial({ color: 0x1b222c, metalness: 0.85, roughness: 0.28 });
 
   const tagHitbox = (obj: THREE.Object3D, hitbox: 'head' | 'body') => {
     obj.userData.combatantId = combatantId;
@@ -101,7 +115,6 @@ export function buildCombatantRig(
     obj.userData.hitbox = hitbox;
   };
 
-  // Articulated legs + combat boots + knee pads
   const legGeo = new THREE.BoxGeometry(0.18, 0.72, 0.2);
   legGeo.translate(0, -0.36, 0);
 
@@ -137,7 +150,6 @@ export function buildCombatantRig(
   rightLeg.add(rightKnee);
   tagHitbox(rightKnee, 'body');
 
-  // Torso BDU + Tactical Plate Carrier + Mag Pouches + Hydration Pack
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.62, 0.26), suitMat);
   torso.position.set(0, 1.06, 0);
   torso.castShadow = true;
@@ -148,7 +160,6 @@ export function buildCombatantRig(
   plateCarrier.castShadow = true;
   tagHitbox(plateCarrier, 'body');
 
-  // Front magazine pouches on plate carrier
   for (let m = -1; m <= 1; m++) {
     const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.06), pouchMat);
     pouch.position.set(m * 0.12, 1.01, 0.17);
@@ -164,7 +175,6 @@ export function buildCombatantRig(
   chestIdPatch.position.set(0, 1.25, 0);
   tagHitbox(chestIdPatch, 'body');
 
-  // Shoulder pauldrons & arms
   const pauldronGeo = new THREE.BoxGeometry(0.16, 0.16, 0.23);
   const leftShoulder = new THREE.Mesh(pauldronGeo, armorMat);
   leftShoulder.position.set(-0.31, 1.28, 0);
@@ -180,7 +190,6 @@ export function buildCombatantRig(
   leftArm.rotation.z = -0.22;
   tagHitbox(leftArm, 'body');
 
-  // Right weapon arm + realistic firearm silhouette
   const rightArm = new THREE.Group();
   rightArm.position.set(0.28, 1.24, 0.04);
 
@@ -189,34 +198,36 @@ export function buildCombatantRig(
   tagHitbox(armMesh, 'body');
   rightArm.add(armMesh);
 
+  const spec = WEAPONS[weaponId] || WEAPONS.m4a1;
   const barrelLen =
-    weaponId === 'm24'
-      ? 0.9
-      : weaponId === 'mk14'
+    spec.category === 'sniper'
+      ? 0.92
+      : spec.category === 'dmr' || spec.category === 'lmg'
       ? 0.78
-      : weaponId === 'm870'
+      : spec.category === 'shotgun'
       ? 0.68
-      : weaponId === 'mp5'
-      ? 0.45
+      : spec.category === 'pistol'
+      ? 0.26
+      : spec.category === 'launcher'
+      ? 0.88
+      : spec.category === 'smg'
+      ? 0.44
       : 0.62;
 
-  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.34), gunMat);
+  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, spec.category === 'pistol' ? 0.22 : 0.34), gunMat);
   receiver.position.set(-0.04, -0.02, 0.42);
   rightArm.add(receiver);
 
   const barrel = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.018, 0.018, barrelLen, 8),
+    new THREE.CylinderGeometry(spec.category === 'launcher' ? 0.045 : 0.018, spec.category === 'launcher' ? 0.045 : 0.018, barrelLen, 8),
     gunMat
   );
   barrel.rotation.x = Math.PI / 2;
   barrel.position.set(-0.04, 0.015, 0.42 + barrelLen * 0.45);
   rightArm.add(barrel);
 
-  if (weaponId === 'm24' || weaponId === 'mk14') {
-    const scope = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.022, 0.022, 0.24, 8),
-      gunMat
-    );
+  if (spec.category === 'sniper' || spec.category === 'dmr') {
+    const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.24, 8), gunMat);
     scope.rotation.x = Math.PI / 2;
     scope.position.set(-0.04, 0.075, 0.44);
     rightArm.add(scope);
@@ -226,7 +237,6 @@ export function buildCombatantRig(
   muzzleWorldAnchor.position.set(-0.04, 0.015, 0.42 + barrelLen * 0.92);
   rightArm.add(muzzleWorldAnchor);
 
-  // Ops-Core style tactical helmet + NVG mount + goggles + comms visor
   const headMesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.32), armorMat);
   headMesh.position.set(0, 1.56, 0);
   headMesh.castShadow = true;
@@ -261,6 +271,21 @@ export function buildCombatantRig(
     helmetStrip
   );
 
+  let nameSprite: THREE.Sprite | undefined;
+  if (displayName && (isHuman || team === 'blue')) {
+    const tex = createNameplateTexture(displayName, team, isHuman);
+    const spMat = new THREE.SpriteMaterial({
+      map: tex,
+      transparent: true,
+      depthTest: true,
+      depthWrite: false,
+    });
+    nameSprite = new THREE.Sprite(spMat);
+    nameSprite.position.set(0, 2.15, 0);
+    nameSprite.scale.set(1.65, 0.42, 1);
+    root.add(nameSprite);
+  }
+
   const hitMeshes: THREE.Object3D[] = [
     headMesh,
     nvgMount,
@@ -286,5 +311,6 @@ export function buildCombatantRig(
     rightArm,
     muzzleWorldAnchor,
     hitMeshes,
+    nameSprite,
   };
 }

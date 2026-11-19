@@ -1,6 +1,6 @@
 {
   "name": "Vanguard Arena",
-  "description": "Lightweight browser-based 3D First-Person Shooter featuring Team Deathmatch and four distinct tactical weapons.",
+  "description": "Lightweight browser-based 3D First-Person Shooter featuring 3-zone 10v10 Team Deathmatch, 50 realistic weapons, Arsenal armories, field guns, guided missiles, air strikes, and online multiplayer.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
