@@ -53,9 +53,44 @@ export const MAPS: Record<MapId, MapInfo> = {
     description: 'Enormous 2160m tropical warzone built for Apache attack helicopters, heavy tank columns, coastal bunkers, and mini hangars.',
     zones: ['North Naval Airfield', 'Central Volcano Ridge', 'South Harbor Beachhead'],
   },
+  killhouse: {
+    id: 'killhouse',
+    name: 'Cargo Killhouse',
+    environment: 'Night-Ops CQB Shoot-House',
+    sizeLabel: '136×136m · 5v5 Infantry Only',
+    description: 'Tight symmetrical CQB training compound with stacked containers, elevated catwalk, breachable walls, and zero vehicles or mounts.',
+    zones: ['North Breach Yard', 'Central Container Gauntlet', 'South Staging Lane'],
+    infantryOnly: true,
+  },
+  metro: {
+    id: 'metro',
+    name: 'Subway Concourse',
+    environment: 'Underground Transit Terminal',
+    sizeLabel: '148×148m · 5v5 Infantry Only',
+    description: 'Close-quarters underground rail terminal with walk-through subway cars, elevated ticket mezzanine, and fast flank corridors.',
+    zones: ['North Ticket Hall', 'Central Track Platforms', 'South Escalator Lobby'],
+    infantryOnly: true,
+  },
+  rooftop: {
+    id: 'rooftop',
+    name: 'Skyline Helideck',
+    environment: 'High-Altitude Dusk Rooftop',
+    sizeLabel: '132×132m · 5v5 Infantry Only',
+    description: 'Elevated skyscraper roof deck above city towers with skylight atrium, HVAC cover lanes, and fast pure gunplay.',
+    zones: ['North Chiller Deck', 'Central Helideck Plaza', 'South Penthouse Terrace'],
+    infantryOnly: true,
+  },
 };
 
-export const MAP_ORDER: MapId[] = ['yard', 'outpost', 'bunker', 'island'];
+export const MAP_ORDER: MapId[] = [
+  'killhouse',
+  'metro',
+  'rooftop',
+  'yard',
+  'outpost',
+  'bunker',
+  'island',
+];
 
 export interface BoxCollider {
   minX: number;
@@ -245,6 +280,7 @@ export interface ArenaData {
   mountedMgs: MountedMgNode[];
   vehicles: VehicleNode[];
   halfSize: number;
+  infantryOnly?: boolean;
   oceanTextures?: { map: THREE.CanvasTexture; bumpMap: THREE.CanvasTexture };
   disposables: {
     geometries: THREE.BufferGeometry[];
@@ -3230,6 +3266,588 @@ export function createTacticalArena(
       vehicles,
       halfSize,
       oceanTextures: oceanTex,
+      disposables: { geometries, materials, textures },
+    };
+  }
+
+  // =========================================================================
+  // MAP 5: CARGO KILLHOUSE (136x136m · Compact 5v5 Infantry Only · Zero Vehicles/Mounts)
+  // =========================================================================
+  if (mapId === 'killhouse') {
+    const halfSize = 68;
+    const zones: ArenaZoneInfo[] = [
+      { id: 'A', name: 'North Breach Yard', centerX: 0, centerZ: -40, radius: 28, accentHex: '#EF4444' },
+      { id: 'B', name: 'Central Container Gauntlet', centerX: 0, centerZ: 0, radius: 26, accentHex: '#F59E0B' },
+      { id: 'C', name: 'South Staging Lane', centerX: 0, centerZ: 40, radius: 28, accentHex: '#3B82F6' },
+    ];
+    const atmosphere: ArenaAtmosphere = {
+      bgColor: 0x161d29,
+      fogColor: 0x141b26,
+      fogDensity: 0.0022,
+      sunColor: 0xe2e8f0,
+      sunIntensity: 2.25,
+      sunPos: [72, 92, 54],
+      hemiSky: 0x7dd3fc,
+      hemiGround: 0x1e293b,
+      hemiIntensity: 1.05,
+    };
+
+    rootGroup.add(
+      buildSkyDome(0x090f1a, 0x162235, 0x28364a, atmosphere.sunPos, [0.9, 0.94, 1.0], 0.35, geometries, materials)
+    );
+
+    const floorTexSet = createArenaFloorTextures(maxAnisotropy);
+    floorTexSet.map.repeat.set(32, 32);
+    floorTexSet.bumpMap.repeat.set(32, 32);
+    floorTexSet.roughnessMap.repeat.set(32, 32);
+    const concreteTexSet = createConcreteWallTextures(maxAnisotropy);
+    const blueContainerTex = createContainerTextures('#1e3a5f', '#3b82f6', maxAnisotropy);
+    const redContainerTex = createContainerTextures('#5c1f24', '#ef4444', maxAnisotropy);
+    const slateContainerTex = createContainerTextures('#334155', '#f59e0b', maxAnisotropy);
+    const deckTexSet = createSteelDeckTextures(maxAnisotropy);
+
+    textures.push(
+      floorTexSet.map, floorTexSet.bumpMap, floorTexSet.roughnessMap,
+      concreteTexSet.map, concreteTexSet.bumpMap,
+      blueContainerTex.map, blueContainerTex.bumpMap,
+      redContainerTex.map, redContainerTex.bumpMap,
+      slateContainerTex.map, slateContainerTex.bumpMap,
+      deckTexSet.map, deckTexSet.bumpMap
+    );
+
+    const floorMat = trackMat(
+      new THREE.MeshStandardMaterial({
+        map: floorTexSet.map, bumpMap: floorTexSet.bumpMap, bumpScale: 0.04,
+        roughnessMap: floorTexSet.roughnessMap, roughness: 0.88, metalness: 0.14,
+      })
+    );
+    const concreteMat = trackMat(
+      new THREE.MeshStandardMaterial({ map: concreteTexSet.map, bumpMap: concreteTexSet.bumpMap, bumpScale: 0.05, roughness: 0.82, metalness: 0.08 })
+    );
+    const deckMat = trackMat(
+      new THREE.MeshStandardMaterial({ map: deckTexSet.map, bumpMap: deckTexSet.bumpMap, bumpScale: 0.04, roughness: 0.38, metalness: 0.74 })
+    );
+    const blueContainerMat = trackMat(
+      new THREE.MeshStandardMaterial({ map: blueContainerTex.map, bumpMap: blueContainerTex.bumpMap, bumpScale: 0.06, roughness: 0.48, metalness: 0.6 })
+    );
+    const redContainerMat = trackMat(
+      new THREE.MeshStandardMaterial({ map: redContainerTex.map, bumpMap: redContainerTex.bumpMap, bumpScale: 0.06, roughness: 0.48, metalness: 0.6 })
+    );
+    const slateContainerMat = trackMat(
+      new THREE.MeshStandardMaterial({ map: slateContainerTex.map, bumpMap: slateContainerTex.bumpMap, bumpScale: 0.06, roughness: 0.48, metalness: 0.6 })
+    );
+    const timberWallMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x7a5c3c, roughness: 0.86, metalness: 0.06 })
+    );
+
+    const floor = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(halfSize * 2, halfSize * 2)), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    rootGroup.add(floor);
+    staticRayMeshes.push(floor);
+
+    // Outer Killhouse Perimeter Walls
+    const wallH = 7.5;
+    const wallT = 2.6;
+    addBox(0, wallH / 2, -halfSize - wallT / 2, halfSize * 2 + wallT * 2, wallH, wallT, concreteMat);
+    addBox(0, wallH / 2, halfSize + wallT / 2, halfSize * 2 + wallT * 2, wallH, wallT, concreteMat);
+    addBox(-halfSize - wallT / 2, wallH / 2, 0, wallT, wallH, halfSize * 2, concreteMat);
+    addBox(halfSize + wallT / 2, wallH / 2, 0, wallT, wallH, halfSize * 2, concreteMat);
+
+    // Stadium Floodlight Towers on 4 Corners
+    for (const [fx, fz] of [[-58, -58], [58, -58], [-58, 58], [58, 58]]) {
+      addBox(fx, 7.0, fz, 1.1, 14.0, 1.1, darkMetalMat);
+      const lamp = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.8, 0.9, 1.4)), amberMat);
+      lamp.position.set(fx, 14.2, fz);
+      rootGroup.add(lamp);
+    }
+
+    // Center Elevated Container Catwalk Bridge (Zone B, y = 2.6m) with West & East Ramps
+    const catY = 2.6;
+    addBox(0, catY / 2, 0, 18, catY, 12, deckMat, true);
+    buildRamp(-18, -9, 0, 5.2, 0, catY, deckMat);
+    buildRamp(18, 9, 0, 5.2, 0, catY, deckMat);
+    addBox(-4.5, catY + 0.55, -5.6, 7.2, 1.1, 0.5, darkMetalMat);
+    addBox(4.5, catY + 0.55, 5.6, 7.2, 1.1, 0.5, darkMetalMat);
+
+    // Symmetrical CQB Container Lanes & Shoot-House Partitions
+    for (const [cx, cz, cw, ch, cd, m] of [
+      [-16, -24, 3.0, 3.2, 11.0, redContainerMat],
+      [16, -24, 3.0, 3.2, 11.0, slateContainerMat],
+      [-16, 24, 3.0, 3.2, 11.0, slateContainerMat],
+      [16, 24, 3.0, 3.2, 11.0, blueContainerMat],
+      [-34, -10, 10.5, 3.2, 3.0, redContainerMat],
+      [34, -10, 10.5, 3.2, 3.0, slateContainerMat],
+      [-34, 10, 10.5, 3.2, 3.0, slateContainerMat],
+      [34, 10, 10.5, 3.2, 3.0, blueContainerMat],
+      [0, -40, 14.0, 3.0, 2.2, concreteMat],
+      [0, 40, 14.0, 3.0, 2.2, concreteMat],
+    ] as Array<[number, number, number, number, number, THREE.Material]>) {
+      addBox(cx, ch / 2, cz, cw, ch, cd, m);
+    }
+
+    // Wing CQB Shoothouse Rooms
+    for (const side of [-1, 1]) {
+      const wx = side * 46;
+      addBox(wx, 1.7, -28, 12, 3.4, 1.1, timberWallMat);
+      addBox(wx, 1.7, 28, 12, 3.4, 1.1, timberWallMat);
+      addBox(wx - side * 7, 1.7, 0, 1.1, 3.4, 24, timberWallMat);
+    }
+
+    // 8 Breachable Shoothouse Walls
+    addDestructibleWall('kh-dw-1', -26, 0, 0, 1.0, 2.8, 10.0, 95, timberWallMat, 'concrete');
+    addDestructibleWall('kh-dw-2', 26, 0, 0, 1.0, 2.8, 10.0, 95, timberWallMat, 'concrete');
+    addDestructibleWall('kh-dw-3', -12, 0, -14, 9.0, 2.7, 1.0, 90, concreteMat, 'concrete');
+    addDestructibleWall('kh-dw-4', 12, 0, -14, 9.0, 2.7, 1.0, 90, concreteMat, 'concrete');
+    addDestructibleWall('kh-dw-5', -12, 0, 14, 9.0, 2.7, 1.0, 90, concreteMat, 'concrete');
+    addDestructibleWall('kh-dw-6', 12, 0, 14, 9.0, 2.7, 1.0, 90, concreteMat, 'concrete');
+    addDestructibleWall('kh-dw-7', -38, 0, -34, 1.0, 2.8, 9.0, 90, timberWallMat, 'concrete');
+    addDestructibleWall('kh-dw-8', 38, 0, 34, 1.0, 2.8, 9.0, 90, timberWallMat, 'concrete');
+
+    for (const [jx, jz, jr] of [
+      [-8, 30, 0.2], [8, 30, -0.2], [-8, -30, -0.2], [8, -30, 0.2],
+      [-28, -22, 0.6], [28, 22, 0.6],
+    ]) {
+      addJerseyBarrier(jx, jz, jr);
+    }
+
+    for (const [px, pz] of [[-24, 38], [24, 38], [-24, -38], [24, -38], [0, -24], [0, 24]]) {
+      addSupplyPallet(px, 0, pz);
+    }
+
+    const barrelsList: Array<[number, number]> = [
+      [-10, -20], [10, -20], [-10, 20], [10, 20],
+      [-30, -6], [30, 6], [-42, 0], [42, 0],
+    ];
+    barrelsList.forEach(([bx, bz], idx) => addExplosiveBarrel(`kh-barrel-${idx}`, bx, 0, bz));
+
+    const arsenals: ArsenalNode[] = [
+      addArsenalStructure('kh-arsenal-blue', 'blue', -18, 0, 52, 0),
+      addArsenalStructure('kh-arsenal-red', 'red', 18, 0, -52, Math.PI),
+    ];
+
+    const pickups = spawnPickups([
+      { id: 'kh-med-w', type: 'health', x: -30, y: 0, z: 0 },
+      { id: 'kh-med-e', type: 'health', x: 30, y: 0, z: 0 },
+      { id: 'kh-ammo-mid', type: 'ammo', x: 0, y: catY, z: 0 },
+      { id: 'kh-ammo-a', type: 'ammo', x: 0, y: 0, z: -32 },
+      { id: 'kh-ammo-c', type: 'ammo', x: 0, y: 0, z: 32 },
+    ]);
+
+    return {
+      mapId,
+      rootGroup,
+      atmosphere,
+      colliders,
+      ramps,
+      staticRayMeshes,
+      destructibleWalls,
+      barrels,
+      zones,
+      arsenals,
+      hangars: [],
+      blueSpawns: [
+        new THREE.Vector3(-12, 0, 58), new THREE.Vector3(-4, 0, 58), new THREE.Vector3(4, 0, 58),
+        new THREE.Vector3(12, 0, 58), new THREE.Vector3(24, 0, 56), new THREE.Vector3(-32, 0, 54),
+        new THREE.Vector3(36, 0, 54), new THREE.Vector3(-48, 0, 50), new THREE.Vector3(48, 0, 50),
+        new THREE.Vector3(0, 0, 52),
+      ],
+      redSpawns: [
+        new THREE.Vector3(-12, 0, -58), new THREE.Vector3(-4, 0, -58), new THREE.Vector3(4, 0, -58),
+        new THREE.Vector3(12, 0, -58), new THREE.Vector3(-24, 0, -56), new THREE.Vector3(32, 0, -54),
+        new THREE.Vector3(-36, 0, -54), new THREE.Vector3(48, 0, -50), new THREE.Vector3(-48, 0, -50),
+        new THREE.Vector3(0, 0, -52),
+      ],
+      waypoints: [
+        new THREE.Vector3(-36, 0, 34), new THREE.Vector3(0, 0, 32), new THREE.Vector3(36, 0, 34),
+        new THREE.Vector3(-48, 0, 12), new THREE.Vector3(-22, 0, 8), new THREE.Vector3(22, 0, 8),
+        new THREE.Vector3(48, 0, 12), new THREE.Vector3(0, catY, 0), new THREE.Vector3(-30, 0, 0),
+        new THREE.Vector3(30, 0, 0), new THREE.Vector3(-48, 0, -12), new THREE.Vector3(-22, 0, -8),
+        new THREE.Vector3(22, 0, -8), new THREE.Vector3(48, 0, -12), new THREE.Vector3(0, 0, -32),
+      ],
+      pickups,
+      beltPickups: [],
+      mountedMgs: [],
+      vehicles: [],
+      halfSize,
+      infantryOnly: true,
+      disposables: { geometries, materials, textures },
+    };
+  }
+
+  // =========================================================================
+  // MAP 6: SUBWAY CONCOURSE (148x148m · Compact 5v5 Infantry Only · Zero Vehicles/Mounts)
+  // =========================================================================
+  if (mapId === 'metro') {
+    const halfSize = 74;
+    const zones: ArenaZoneInfo[] = [
+      { id: 'A', name: 'North Ticket Hall', centerX: 0, centerZ: -44, radius: 30, accentHex: '#EF4444' },
+      { id: 'B', name: 'Central Track Platforms', centerX: 0, centerZ: 0, radius: 30, accentHex: '#F59E0B' },
+      { id: 'C', name: 'South Escalator Lobby', centerX: 0, centerZ: 44, radius: 30, accentHex: '#3B82F6' },
+    ];
+    const atmosphere: ArenaAtmosphere = {
+      bgColor: 0x0b1018,
+      fogColor: 0x0d1420,
+      fogDensity: 0.0026,
+      sunColor: 0xcbd5e1,
+      sunIntensity: 1.9,
+      sunPos: [30, 84, 24],
+      hemiSky: 0x60a5fa,
+      hemiGround: 0x111827,
+      hemiIntensity: 1.1,
+    };
+
+    const floorTexSet = createBunkerFloorTextures(maxAnisotropy);
+    floorTexSet.map.repeat.set(34, 34);
+    floorTexSet.bumpMap.repeat.set(34, 34);
+    const concreteTexSet = createConcreteWallTextures(maxAnisotropy);
+    const deckTexSet = createSteelDeckTextures(maxAnisotropy);
+    textures.push(
+      floorTexSet.map, floorTexSet.bumpMap,
+      concreteTexSet.map, concreteTexSet.bumpMap,
+      deckTexSet.map, deckTexSet.bumpMap
+    );
+
+    const floorMat = trackMat(
+      new THREE.MeshStandardMaterial({
+        map: floorTexSet.map, bumpMap: floorTexSet.bumpMap, bumpScale: 0.04, roughness: 0.55, metalness: 0.25,
+      })
+    );
+    const wallMat = trackMat(
+      new THREE.MeshStandardMaterial({ map: concreteTexSet.map, bumpMap: concreteTexSet.bumpMap, bumpScale: 0.05, roughness: 0.78, metalness: 0.14 })
+    );
+    const pillarMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x263244, roughness: 0.52, metalness: 0.55 })
+    );
+    const trainBlueMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x1e40af, roughness: 0.36, metalness: 0.68 })
+    );
+    const trainRedMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.36, metalness: 0.68 })
+    );
+    const trainSilverMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.32, metalness: 0.78 })
+    );
+    const ceilingMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x0f1623, roughness: 0.9, metalness: 0.2 })
+    );
+    const lightStripMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0xe0f2fe, emissive: 0x7dd3fc, emissiveIntensity: 1.9, roughness: 0.1 })
+    );
+
+    const floor = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(halfSize * 2, halfSize * 2)), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    rootGroup.add(floor);
+    staticRayMeshes.push(floor);
+
+    // High Subterranean Terminal Ceiling (kept high at y=18m with illuminated light bars)
+    const ceiling = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(halfSize * 2, halfSize * 2)), ceilingMat);
+    ceiling.rotation.x = Math.PI / 2;
+    ceiling.position.y = 18;
+    rootGroup.add(ceiling);
+    for (const lz of [-44, -18, 0, 18, 44]) {
+      const strip = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(88, 0.25, 1.4)), lightStripMat);
+      strip.position.set(0, 17.6, lz);
+      rootGroup.add(strip);
+    }
+
+    // Perimeter Station Bulkheads
+    const wallH = 18;
+    const wallT = 2.8;
+    addBox(0, wallH / 2, -halfSize - wallT / 2, halfSize * 2 + wallT * 2, wallH, wallT, wallMat);
+    addBox(0, wallH / 2, halfSize + wallT / 2, halfSize * 2 + wallT * 2, wallH, wallT, wallMat);
+    addBox(-halfSize - wallT / 2, wallH / 2, 0, wallT, wallH, halfSize * 2, wallMat);
+    addBox(halfSize + wallT / 2, wallH / 2, 0, wallT, wallH, halfSize * 2, wallMat);
+
+    // Structural Subway Station Columns
+    for (const px of [-46, -15, 15, 46]) {
+      for (const pz of [-42, -18, 18, 42]) {
+        addBox(px, 9.0, pz, 2.4, 18.0, 2.4, pillarMat);
+        addBox(px, 2.4, pz, 2.6, 0.2, 2.6, amberMat, false, false);
+      }
+    }
+
+    // Central Elevated Ticket Mezzanine Platform (y = 2.7m) + North/South Wide Ramps
+    const mezY = 2.7;
+    addBox(0, mezY / 2, 0, 20, mezY, 16, pillarMat, true);
+    buildZRamp(0, 8, -17, -8, 0, mezY, floorMat);
+    buildZRamp(0, 8, 17, 8, 0, mezY, floorMat);
+    addBox(-8.5, mezY + 0.55, 0, 0.8, 1.1, 13.5, darkMetalMat);
+    addBox(8.5, mezY + 0.55, 0, 0.8, 1.1, 13.5, darkMetalMat);
+
+    // Parked Walk-Through Subway Train Cars on West (x = -29) & East (x = +29) Tracks
+    const buildTrainCar = (tx: number, tz: number, bodyMat: THREE.Material) => {
+      addBox(tx, 0.22, tz, 4.4, 0.44, 24.0, darkMetalMat);
+      addBox(tx, 3.65, tz, 4.5, 0.32, 24.2, trainSilverMat, false);
+      addBox(tx, 1.95, tz - 11.7, 4.3, 3.1, 0.6, bodyMat);
+      addBox(tx, 1.95, tz + 11.7, 4.3, 3.1, 0.6, bodyMat);
+      for (const segZ of [-8.8, -2.9, 2.9, 8.8]) {
+        addBox(tx - 2.05, 1.95, tz + segZ, 0.28, 3.1, 2.6, bodyMat);
+        addBox(tx + 2.05, 1.95, tz + segZ, 0.28, 3.1, 2.6, bodyMat);
+      }
+      addBox(tx - 1.2, 0.05, tz, 0.18, 0.1, 108, darkMetalMat, false, false);
+      addBox(tx + 1.2, 0.05, tz, 0.18, 0.1, 108, darkMetalMat, false, false);
+    };
+    buildTrainCar(-29, -15, trainRedMat);
+    buildTrainCar(-29, 15, trainBlueMat);
+    buildTrainCar(29, -15, trainRedMat);
+    buildTrainCar(29, 15, trainBlueMat);
+
+    // Ticket Turnstile Kiosks in North (A) & South (C) Halls
+    for (const tz of [-46, 46]) {
+      for (const kx of [-24, -8, 8, 24]) {
+        addBox(kx, 0.75, tz, 4.2, 1.5, 1.4, pillarMat);
+        addBox(kx, 1.56, tz, 4.3, 0.12, 1.45, cyanMat, false, false);
+      }
+    }
+
+    // 8 Destructible Station Service Barriers
+    addDestructibleWall('metro-dw-1', -20, 0, 0, 1.1, 2.8, 10.0, 100, wallMat, 'concrete');
+    addDestructibleWall('metro-dw-2', 20, 0, 0, 1.1, 2.8, 10.0, 100, wallMat, 'concrete');
+    addDestructibleWall('metro-dw-3', -52, 0, -14, 12.0, 2.9, 1.1, 100, wallMat, 'concrete');
+    addDestructibleWall('metro-dw-4', 52, 0, -14, 12.0, 2.9, 1.1, 100, wallMat, 'concrete');
+    addDestructibleWall('metro-dw-5', -52, 0, 14, 12.0, 2.9, 1.1, 100, wallMat, 'concrete');
+    addDestructibleWall('metro-dw-6', 52, 0, 14, 12.0, 2.9, 1.1, 100, wallMat, 'concrete');
+    addDestructibleWall('metro-dw-7', 0, 0, -32, 12.0, 2.6, 1.1, 95, wallMat, 'concrete');
+    addDestructibleWall('metro-dw-8', 0, 0, 32, 12.0, 2.6, 1.1, 95, wallMat, 'concrete');
+
+    const metroBarrels: Array<[number, number]> = [
+      [-12, -26], [12, -26], [-12, 26], [12, 26],
+      [-40, -28], [40, 28], [-40, 28], [40, -28],
+    ];
+    metroBarrels.forEach(([bx, bz], idx) => addExplosiveBarrel(`metro-barrel-${idx}`, bx, 0, bz));
+
+    const arsenals: ArsenalNode[] = [
+      addArsenalStructure('metro-arsenal-blue', 'blue', -26, 0, 62, 0),
+      addArsenalStructure('metro-arsenal-red', 'red', 26, 0, -62, Math.PI),
+    ];
+
+    const pickups = spawnPickups([
+      { id: 'metro-med-w', type: 'health', x: -29, y: 0.45, z: 0 },
+      { id: 'metro-med-e', type: 'health', x: 29, y: 0.45, z: 0 },
+      { id: 'metro-ammo-mid', type: 'ammo', x: 0, y: mezY, z: 0 },
+      { id: 'metro-ammo-a', type: 'ammo', x: -38, y: 0, z: -42 },
+      { id: 'metro-ammo-c', type: 'ammo', x: 38, y: 0, z: 42 },
+    ]);
+
+    return {
+      mapId,
+      rootGroup,
+      atmosphere,
+      colliders,
+      ramps,
+      staticRayMeshes,
+      destructibleWalls,
+      barrels,
+      zones,
+      arsenals,
+      hangars: [],
+      blueSpawns: [
+        new THREE.Vector3(-12, 0, 64), new THREE.Vector3(-4, 0, 64), new THREE.Vector3(4, 0, 64),
+        new THREE.Vector3(12, 0, 64), new THREE.Vector3(24, 0, 62), new THREE.Vector3(-44, 0, 60),
+        new THREE.Vector3(44, 0, 60), new THREE.Vector3(-58, 0, 56), new THREE.Vector3(58, 0, 56),
+        new THREE.Vector3(0, 0, 58),
+      ],
+      redSpawns: [
+        new THREE.Vector3(-12, 0, -64), new THREE.Vector3(-4, 0, -64), new THREE.Vector3(4, 0, -64),
+        new THREE.Vector3(12, 0, -64), new THREE.Vector3(-24, 0, -62), new THREE.Vector3(44, 0, -60),
+        new THREE.Vector3(-44, 0, -60), new THREE.Vector3(58, 0, -56), new THREE.Vector3(-58, 0, -56),
+        new THREE.Vector3(0, 0, -58),
+      ],
+      waypoints: [
+        new THREE.Vector3(-40, 0, 36), new THREE.Vector3(0, 0, 38), new THREE.Vector3(40, 0, 36),
+        new THREE.Vector3(-56, 0, 0), new THREE.Vector3(-29, 0.45, 14), new THREE.Vector3(29, 0.45, 14),
+        new THREE.Vector3(56, 0, 0), new THREE.Vector3(0, mezY, 0), new THREE.Vector3(-29, 0.45, -14),
+        new THREE.Vector3(29, 0.45, -14), new THREE.Vector3(-40, 0, -36), new THREE.Vector3(0, 0, -38),
+        new THREE.Vector3(40, 0, -36), new THREE.Vector3(-16, 0, 0), new THREE.Vector3(16, 0, 0),
+      ],
+      pickups,
+      beltPickups: [],
+      mountedMgs: [],
+      vehicles: [],
+      halfSize,
+      infantryOnly: true,
+      disposables: { geometries, materials, textures },
+    };
+  }
+
+  // =========================================================================
+  // MAP 7: SKYLINE HELIDECK (132x132m · Compact 5v5 Infantry Only · Zero Vehicles/Mounts)
+  // =========================================================================
+  if (mapId === 'rooftop') {
+    const halfSize = 66;
+    const zones: ArenaZoneInfo[] = [
+      { id: 'A', name: 'North Chiller Deck', centerX: 0, centerZ: -38, radius: 28, accentHex: '#EF4444' },
+      { id: 'B', name: 'Central Helideck Plaza', centerX: 0, centerZ: 0, radius: 26, accentHex: '#F59E0B' },
+      { id: 'C', name: 'South Penthouse Terrace', centerX: 0, centerZ: 38, radius: 28, accentHex: '#3B82F6' },
+    ];
+    const atmosphere: ArenaAtmosphere = {
+      bgColor: 0x1c2538,
+      fogColor: 0x243047,
+      fogDensity: 0.0014,
+      sunColor: 0xffcfa0,
+      sunIntensity: 2.55,
+      sunPos: [110, 76, -85],
+      hemiSky: 0x93c5fd,
+      hemiGround: 0x283244,
+      hemiIntensity: 1.0,
+    };
+
+    rootGroup.add(
+      buildSkyDome(0x0d1b32, 0x263f63, 0x9a644c, atmosphere.sunPos, [1.0, 0.72, 0.44], 0.52, geometries, materials)
+    );
+
+    const floorTexSet = createConcreteWallTextures(maxAnisotropy);
+    floorTexSet.map.repeat.set(22, 22);
+    floorTexSet.bumpMap.repeat.set(22, 22);
+    const deckTexSet = createSteelDeckTextures(maxAnisotropy);
+    textures.push(floorTexSet.map, floorTexSet.bumpMap, deckTexSet.map, deckTexSet.bumpMap);
+
+    const roofConcreteMat = trackMat(
+      new THREE.MeshStandardMaterial({ map: floorTexSet.map, bumpMap: floorTexSet.bumpMap, bumpScale: 0.04, roughness: 0.76, metalness: 0.12 })
+    );
+    const steelMat = trackMat(
+      new THREE.MeshStandardMaterial({ map: deckTexSet.map, bumpMap: deckTexSet.bumpMap, bumpScale: 0.04, roughness: 0.36, metalness: 0.78 })
+    );
+    const glassMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.12, metalness: 0.86, transparent: true, opacity: 0.72 })
+    );
+    const towerMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x162032, roughness: 0.42, metalness: 0.65 })
+    );
+    const windowGlowMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0xfde68a, emissive: 0xf59e0b, emissiveIntensity: 0.85 })
+    );
+
+    const mainRoof = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(halfSize * 2, halfSize * 2)), roofConcreteMat);
+    mainRoof.rotation.x = -Math.PI / 2;
+    mainRoof.receiveShadow = true;
+    rootGroup.add(mainRoof);
+    staticRayMeshes.push(mainRoof);
+
+    // Decorative Helipad Circle at Zone B (No helicopters spawned — pure 5v5 infantry deck)
+    addHelipad('rooftop-decor-pad', 'blue', 0, 0, 0);
+
+    // Surrounding Skyline Skyscraper Towers below the Roof Horizon
+    for (const [tx, tz, tw, th, td] of [
+      [-125, -110, 36, 95, 36], [125, -105, 42, 110, 38],
+      [-130, 105, 38, 102, 34], [128, 115, 40, 88, 36],
+      [-115, 0, 30, 82, 48], [118, 6, 32, 90, 44],
+      [0, -124, 52, 92, 32], [0, 126, 48, 86, 32],
+    ]) {
+      const bldg = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(tw, th, td)), towerMat);
+      bldg.position.set(tx, -th / 2 - 4, tz);
+      const crownTrim = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(tw + 0.6, 1.2, td + 0.6)), windowGlowMat);
+      crownTrim.position.set(tx, -3.4, tz);
+      rootGroup.add(bldg, crownTrim);
+    }
+
+    // Perimeter Rooftop Concrete Safety Parapet Walls
+    const parH = 3.2;
+    const parT = 2.0;
+    addBox(0, parH / 2, -halfSize - parT / 2, halfSize * 2 + parT * 2, parH, parT, roofConcreteMat);
+    addBox(0, parH / 2, halfSize + parT / 2, halfSize * 2 + parT * 2, parH, parT, roofConcreteMat);
+    addBox(-halfSize - parT / 2, parH / 2, 0, parT, parH, halfSize * 2, roofConcreteMat);
+    addBox(halfSize + parT / 2, parH / 2, 0, parT, parH, halfSize * 2, roofConcreteMat);
+
+    // Dual Elevated Penthouse Overlook Decks (West & East x = ±36, y = 2.8m)
+    const deckY = 2.8;
+    for (const side of [-1, 1]) {
+      addBox(side * 36, deckY / 2, 0, 16, deckY, 26, roofConcreteMat, true);
+      buildZRamp(side * 36, 7.5, -21, -13, 0, deckY, steelMat);
+      buildZRamp(side * 36, 7.5, 21, 13, 0, deckY, steelMat);
+      addBox(side * 36, deckY + 1.6, 0, 10, 0.25, 14, glassMat, false, false);
+      for (const cz of [-6.5, 6.5]) {
+        addBox(side * 31.2, deckY + 0.85, cz, 0.45, 1.7, 0.45, darkMetalMat);
+        addBox(side * 40.8, deckY + 0.85, cz, 0.45, 1.7, 0.45, darkMetalMat);
+      }
+    }
+
+    // Industrial HVAC Chiller Units & Duct Cover across North & South Decks
+    for (const [hx, hz, hw, hh, hd] of [
+      [-18, -32, 9.5, 2.8, 5.2], [18, -32, 9.5, 2.8, 5.2],
+      [-18, 32, 9.5, 2.8, 5.2], [18, 32, 9.5, 2.8, 5.2],
+      [-48, -38, 7.5, 2.6, 8.0], [48, -38, 7.5, 2.6, 8.0],
+      [-48, 38, 7.5, 2.6, 8.0], [48, 38, 7.5, 2.6, 8.0],
+      [0, -20, 12.0, 1.5, 2.2], [0, 20, 12.0, 1.5, 2.2],
+    ]) {
+      addBox(hx, hh / 2, hz, hw, hh, hd, steelMat);
+      addBox(hx, hh + 0.14, hz, hw * 0.7, 0.24, hd * 0.7, darkMetalMat, false, false);
+    }
+
+    // 8 Breachable Rooftop Maintenance Screens
+    addDestructibleWall('roof-dw-1', -18, 0, 0, 1.0, 2.6, 10.0, 95, roofConcreteMat, 'concrete');
+    addDestructibleWall('roof-dw-2', 18, 0, 0, 1.0, 2.6, 10.0, 95, roofConcreteMat, 'concrete');
+    addDestructibleWall('roof-dw-3', 0, 0, -48, 12.0, 2.8, 1.1, 100, roofConcreteMat, 'concrete');
+    addDestructibleWall('roof-dw-4', 0, 0, 48, 12.0, 2.8, 1.1, 100, roofConcreteMat, 'concrete');
+    addDestructibleWall('roof-dw-5', -36, 0, -28, 10.0, 2.6, 1.0, 95, steelMat, 'steel');
+    addDestructibleWall('roof-dw-6', 36, 0, -28, 10.0, 2.6, 1.0, 95, steelMat, 'steel');
+    addDestructibleWall('roof-dw-7', -36, 0, 28, 10.0, 2.6, 1.0, 95, steelMat, 'steel');
+    addDestructibleWall('roof-dw-8', 36, 0, 28, 10.0, 2.6, 1.0, 95, steelMat, 'steel');
+
+    for (const [jx, jz, jr] of [
+      [-10, 14, 0.25], [10, 14, -0.25], [-10, -14, -0.25], [10, -14, 0.25],
+    ]) {
+      addJerseyBarrier(jx, jz, jr);
+    }
+
+    const roofBarrels: Array<[number, number]> = [
+      [-12, -26], [12, -26], [-12, 26], [12, 26],
+      [-24, 0], [24, 0], [-52, 0], [52, 0],
+    ];
+    roofBarrels.forEach(([bx, bz], idx) => addExplosiveBarrel(`roof-barrel-${idx}`, bx, 0, bz));
+
+    const arsenals: ArsenalNode[] = [
+      addArsenalStructure('roof-arsenal-blue', 'blue', -22, 0, 52, 0),
+      addArsenalStructure('roof-arsenal-red', 'red', 22, 0, -52, Math.PI),
+    ];
+
+    const pickups = spawnPickups([
+      { id: 'roof-med-w', type: 'health', x: -36, y: deckY, z: 0 },
+      { id: 'roof-med-e', type: 'health', x: 36, y: deckY, z: 0 },
+      { id: 'roof-ammo-mid', type: 'ammo', x: 0, y: 0.25, z: 0 },
+      { id: 'roof-ammo-a', type: 'ammo', x: 0, y: 0, z: -38 },
+      { id: 'roof-ammo-c', type: 'ammo', x: 0, y: 0, z: 38 },
+    ]);
+
+    return {
+      mapId,
+      rootGroup,
+      atmosphere,
+      colliders,
+      ramps,
+      staticRayMeshes,
+      destructibleWalls,
+      barrels,
+      zones,
+      arsenals,
+      hangars: [],
+      blueSpawns: [
+        new THREE.Vector3(-10, 0, 56), new THREE.Vector3(-3, 0, 56), new THREE.Vector3(3, 0, 56),
+        new THREE.Vector3(10, 0, 56), new THREE.Vector3(24, 0, 54), new THREE.Vector3(-36, 0, 54),
+        new THREE.Vector3(36, 0, 54), new THREE.Vector3(-52, 0, 50), new THREE.Vector3(52, 0, 50),
+        new THREE.Vector3(0, 0, 52),
+      ],
+      redSpawns: [
+        new THREE.Vector3(-10, 0, -56), new THREE.Vector3(-3, 0, -56), new THREE.Vector3(3, 0, -56),
+        new THREE.Vector3(10, 0, -56), new THREE.Vector3(-24, 0, -54), new THREE.Vector3(36, 0, -54),
+        new THREE.Vector3(-36, 0, -54), new THREE.Vector3(52, 0, -50), new THREE.Vector3(-52, 0, -50),
+        new THREE.Vector3(0, 0, -52),
+      ],
+      waypoints: [
+        new THREE.Vector3(-36, 0, 32), new THREE.Vector3(0, 0, 34), new THREE.Vector3(36, 0, 32),
+        new THREE.Vector3(-52, 0, 0), new THREE.Vector3(-36, deckY, 0), new THREE.Vector3(36, deckY, 0),
+        new THREE.Vector3(52, 0, 0), new THREE.Vector3(0, 0.25, 0), new THREE.Vector3(-22, 0, -10),
+        new THREE.Vector3(22, 0, -10), new THREE.Vector3(-36, 0, -32), new THREE.Vector3(0, 0, -34),
+        new THREE.Vector3(36, 0, -32), new THREE.Vector3(-22, 0, 10), new THREE.Vector3(22, 0, 10),
+      ],
+      pickups,
+      beltPickups: [],
+      mountedMgs: [],
+      vehicles: [],
+      halfSize,
+      infantryOnly: true,
       disposables: { geometries, materials, textures },
     };
   }

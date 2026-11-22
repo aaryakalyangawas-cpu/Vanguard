@@ -28,7 +28,7 @@ function createContactShadowTexture(): THREE.CanvasTexture {
   return new THREE.CanvasTexture(canvas);
 }
 
-function createNameplateTexture(label: string, team: TeamId, isHuman: boolean): THREE.CanvasTexture {
+function createNameplateTexture(label: string, team: TeamId, isHuman: boolean, isFfa = false): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 64;
@@ -41,7 +41,7 @@ function createNameplateTexture(label: string, team: TeamId, isHuman: boolean): 
   ctx.fill();
 
   ctx.lineWidth = 2;
-  ctx.strokeStyle = team === 'blue' ? '#3b82f6' : '#ef4444';
+  ctx.strokeStyle = isFfa ? '#f59e0b' : team === 'blue' ? '#3b82f6' : '#ef4444';
   ctx.stroke();
 
   ctx.font = 'bold 20px "Plus Jakarta Sans", sans-serif';
@@ -62,7 +62,8 @@ export function buildCombatantRig(
   team: TeamId,
   weaponId: WeaponId,
   displayName?: string,
-  isHuman = false
+  isHuman = false,
+  isFfa = false
 ): CombatantRig {
   const root = new THREE.Group();
   const bodyPivot = new THREE.Group();
@@ -86,9 +87,9 @@ export function buildCombatantRig(
   root.add(contactShadow);
 
   const isBlue = team === 'blue';
-  const armorColor = isBlue ? 0x1e40af : 0x991b1b;
-  const trimColor = isBlue ? 0x3b82f6 : 0xef4444;
-  const bduColor = isBlue ? 0x1f2937 : 0x262124;
+  const armorColor = isFfa ? 0x7c2d12 : isBlue ? 0x1e40af : 0x991b1b;
+  const trimColor = isFfa ? 0xf59e0b : isBlue ? 0x3b82f6 : 0xef4444;
+  const bduColor = isFfa ? 0x242220 : isBlue ? 0x1f2937 : 0x262124;
 
   const armorMat = new THREE.MeshStandardMaterial({ color: armorColor, metalness: 0.35, roughness: 0.48 });
   const suitMat = new THREE.MeshStandardMaterial({ color: bduColor, metalness: 0.08, roughness: 0.84 });
@@ -101,10 +102,10 @@ export function buildCombatantRig(
     emissiveIntensity: 0.45,
   });
   const visorMat = new THREE.MeshStandardMaterial({
-    color: isBlue ? 0x38bdf8 : 0xf97316,
+    color: isFfa ? 0xfbbf24 : isBlue ? 0x38bdf8 : 0xf97316,
     metalness: 0.92,
     roughness: 0.1,
-    emissive: isBlue ? 0x0284c7 : 0xea580c,
+    emissive: isFfa ? 0xd97706 : isBlue ? 0x0284c7 : 0xea580c,
     emissiveIntensity: 0.75,
   });
   const gunMat = new THREE.MeshStandardMaterial({ color: 0x1b222c, metalness: 0.85, roughness: 0.28 });
@@ -272,8 +273,8 @@ export function buildCombatantRig(
   );
 
   let nameSprite: THREE.Sprite | undefined;
-  if (displayName && (isHuman || team === 'blue')) {
-    const tex = createNameplateTexture(displayName, team, isHuman);
+  if (displayName && (isHuman || isFfa || team === 'blue')) {
+    const tex = createNameplateTexture(displayName, team, isHuman, isFfa);
     const spMat = new THREE.SpriteMaterial({
       map: tex,
       transparent: true,

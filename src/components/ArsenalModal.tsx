@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Check, Package, Search, Shield, X } from 'lucide-react';
 import { LoadoutSlots, WeaponCategory, WeaponId } from '../game/types';
 import { WEAPON_CATEGORIES, WEAPON_ORDER, WEAPONS } from '../game/weapons';
+import { WeaponArtwork } from './WeaponArtwork';
 
 interface ArsenalModalProps {
   arsenalName: string;
@@ -119,6 +120,9 @@ export const ArsenalModal: React.FC<ArsenalModalProps> = ({
                 <div className="text-[10px] sm:text-[11px] text-slate-400 truncate">
                   {equipped.caliber} · {equipped.magSize} rd
                 </div>
+                <div className="mt-1.5 rounded bg-[#080c14] border border-slate-800/80 px-2 py-1">
+                  <WeaponArtwork weapon={equipped} className="w-full h-9 sm:h-11" />
+                </div>
               </button>
             );
           })}
@@ -209,6 +213,10 @@ export const ArsenalModal: React.FC<ArsenalModalProps> = ({
                       </span>
                     )}
                   </div>
+                </div>
+
+                <div className="mt-2 rounded-md bg-[#0a0f18] border border-slate-800/80 px-2.5 py-1.5">
+                  <WeaponArtwork weapon={w} className="w-full h-14" />
                 </div>
 
                 <div className="space-y-1 mt-2 text-[10px] text-slate-400">

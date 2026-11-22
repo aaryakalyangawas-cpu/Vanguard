@@ -20,12 +20,15 @@ interface StoredAccount {
   createdAt: number;
 }
 
+type MatchMode = 'tdm' | 'ffa' | 'gun_game';
+
 interface RoomPlayer {
   id: string;
   ws: WebSocket;
   username: string;
   team: 'blue' | 'red';
   weaponId: string;
+  gunGameTier: number;
   x: number;
   y: number;
   z: number;
@@ -59,10 +62,13 @@ interface RoomVehicleState {
 interface MultiplayerRoom {
   roomId: string;
   mapId: string;
+  matchMode: MatchMode;
+  teamSize: number;
   scoreLimit: number;
   botFill: boolean;
   blueScore: number;
   redScore: number;
+  winnerName: string | null;
   timeRemaining: number;
   players: Map<string, RoomPlayer>;
   vehicles: Map<string, RoomVehicleState>;
@@ -192,12 +198,14 @@ async function startServer() {
 
   // API: Update Career Stats
   app.post('/api/auth/stats', (req, res) => {
-    const { email, killsDelta, deathsDelta } = req.body || {};
+    const { email, killsDelta, deathsDelta, kills, deaths } = req.body || {};
     if (!email) return res.json({ ok: true });
     const acc = accounts.find((a) => a.email === String(email).trim().toLowerCase());
     if (!acc) return res.json({ ok: false });
-    acc.kills += Math.max(0, Number(killsDelta) || 0);
-    acc.deaths += Math.max(0, Number(deathsDelta) || 0);
+    const kAdd = killsDelta !== undefined ? Number(killsDelta) : Number(kills);
+    const dAdd = deathsDelta !== undefined ? Number(deathsDelta) : Number(deaths);
+    acc.kills += Math.max(0, Number.isFinite(kAdd) ? kAdd : 0);
+    acc.deaths += Math.max(0, Number.isFinite(dAdd) ? dAdd : 0);
     acc.matches += 1;
     saveAccounts(accounts);
     return res.json({
@@ -219,6 +227,8 @@ async function startServer() {
     const list = Array.from(rooms.values()).map((r) => ({
       roomId: r.roomId,
       mapId: r.mapId,
+      matchMode: r.matchMode,
+      teamSize: r.teamSize,
       scoreLimit: r.scoreLimit,
       botFill: r.botFill,
       humanCount: r.players.size,
@@ -258,6 +268,7 @@ async function startServer() {
       username: p.username,
       team: p.team,
       weaponId: p.weaponId,
+      gunGameTier: p.gunGameTier,
       x: p.x,
       y: p.y,
       z: p.z,
@@ -278,10 +289,13 @@ async function startServer() {
       type: 'room_snapshot',
       roomId: room.roomId,
       mapId: room.mapId,
+      matchMode: room.matchMode,
+      teamSize: room.teamSize,
       scoreLimit: room.scoreLimit,
       botFill: room.botFill,
       blueScore: room.blueScore,
       redScore: room.redScore,
+      winnerName: room.winnerName,
       timeRemaining: room.timeRemaining,
       players,
       vehicles,
@@ -328,13 +342,27 @@ async function startServer() {
 
         let room = rooms.get(roomId);
         if (!room) {
+          const rawMode = String(msg.matchMode || 'tdm');
+          const matchMode: MatchMode =
+            rawMode === 'ffa' || rawMode === 'gun_game' ? rawMode : 'tdm';
+          const rawTeamSize = Number(msg.teamSize);
+          const teamSize =
+            rawTeamSize === 4 || rawTeamSize === 5 || rawTeamSize === 6 || rawTeamSize === 10
+              ? rawTeamSize
+              : 5;
+          const rawLimit = Number(msg.scoreLimit);
+          const scoreLimit = rawLimit === 25 || rawLimit === 50 || rawLimit === 75 ? rawLimit : 50;
+
           room = {
             roomId,
             mapId: String(msg.mapId || 'yard'),
-            scoreLimit: Number(msg.scoreLimit) || 50,
+            matchMode,
+            teamSize,
+            scoreLimit,
             botFill: msg.botFill !== false,
             blueScore: 0,
             redScore: 0,
+            winnerName: null,
             timeRemaining: 360,
             players: new Map(),
             vehicles: new Map(),
@@ -344,15 +372,20 @@ async function startServer() {
         }
 
         const team: 'blue' | 'red' = msg.team === 'red' ? 'red' : 'blue';
+        const isSmallInfantryMap =
+          room.mapId === 'killhouse' || room.mapId === 'metro' || room.mapId === 'rooftop';
+        const spawnZ =
+          room.mapId === 'island' ? 420 : isSmallInfantryMap ? 48 : 140;
         const player: RoomPlayer = {
           id: clientId,
           ws,
           username: sanitizeUsername(msg.username),
           team,
           weaponId: String(msg.weaponId || 'm4a1'),
+          gunGameTier: 0,
           x: 0,
           y: 0,
-          z: team === 'blue' ? (room.mapId === 'island' ? 420 : 140) : room.mapId === 'island' ? -420 : -140,
+          z: team === 'blue' ? spawnZ : -spawnZ,
           yaw: team === 'blue' ? 0 : Math.PI,
           pitch: 0,
           vx: 0,
@@ -375,6 +408,8 @@ async function startServer() {
             playerId: clientId,
             roomId: room.roomId,
             mapId: room.mapId,
+            matchMode: room.matchMode,
+            teamSize: room.teamSize,
             scoreLimit: room.scoreLimit,
             botFill: room.botFill,
           })
@@ -396,6 +431,9 @@ async function startServer() {
         self.vx = Number(msg.vx) || 0;
         self.vz = Number(msg.vz) || 0;
         self.weaponId = String(msg.weaponId || self.weaponId);
+        if (msg.gunGameTier !== undefined) {
+          self.gunGameTier = Math.max(0, Number(msg.gunGameTier) || 0);
+        }
         self.health = Number(msg.health ?? self.health);
         self.alive = msg.alive !== false;
         const nextVehId = msg.vehicleId && self.alive ? String(msg.vehicleId) : null;
@@ -510,8 +548,16 @@ async function startServer() {
             target.alive = false;
             target.deaths += 1;
             self.kills += 1;
-            if (self.team === 'blue') currentRoom.blueScore += 1;
-            else currentRoom.redScore += 1;
+            if (currentRoom.matchMode === 'tdm') {
+              if (self.team === 'blue') currentRoom.blueScore += 1;
+              else currentRoom.redScore += 1;
+            } else if (currentRoom.matchMode === 'ffa') {
+              if (self.kills >= currentRoom.scoreLimit && !currentRoom.winnerName) {
+                currentRoom.winnerName = self.username;
+              }
+            } else if (currentRoom.matchMode === 'gun_game') {
+              self.gunGameTier += 1;
+            }
           }
           broadcastRoom(currentRoom, {
             type: 'remote_damage',
@@ -529,8 +575,18 @@ async function startServer() {
       }
 
       if (msg.type === 'bot_kill') {
-        if (msg.team === 'blue') currentRoom.blueScore += 1;
-        else if (msg.team === 'red') currentRoom.redScore += 1;
+        if (currentRoom.matchMode === 'tdm') {
+          if (msg.team === 'blue') currentRoom.blueScore += 1;
+          else if (msg.team === 'red') currentRoom.redScore += 1;
+        } else {
+          self.kills += 1;
+          if (msg.gunGameTier !== undefined) {
+            self.gunGameTier = Math.max(self.gunGameTier, Number(msg.gunGameTier) || 0);
+          }
+          if (currentRoom.matchMode === 'ffa' && self.kills >= currentRoom.scoreLimit && !currentRoom.winnerName) {
+            currentRoom.winnerName = self.username;
+          }
+        }
         return;
       }
 

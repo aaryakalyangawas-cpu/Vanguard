@@ -90,7 +90,16 @@ export type WeaponId =
   | 'bgm71_sraw'
   | 'fim92_stinger';
 
-export type MapId = 'yard' | 'outpost' | 'bunker' | 'island';
+export type MapId =
+  | 'yard'
+  | 'outpost'
+  | 'bunker'
+  | 'island'
+  | 'killhouse'
+  | 'metro'
+  | 'rooftop';
+
+export type MatchMode = 'tdm' | 'ffa' | 'gun_game';
 
 export interface ArenaZoneInfo {
   id: 'A' | 'B' | 'C';
@@ -108,6 +117,7 @@ export interface MapInfo {
   sizeLabel: string;
   description: string;
   zones: [string, string, string];
+  infantryOnly?: boolean;
 }
 
 export type Difficulty = 'recruit' | 'tactical' | 'veteran';
@@ -180,6 +190,8 @@ export interface PlayerAccount {
 export interface MultiplayerRoomSummary {
   roomId: string;
   mapId: MapId;
+  matchMode: MatchMode;
+  teamSize: number;
   scoreLimit: 25 | 50 | 75;
   botFill: boolean;
   humanCount: number;
@@ -192,7 +204,8 @@ export type TouchControlsMode = 'auto' | 'on' | 'off';
 
 export interface MatchConfig {
   mapId: MapId;
-  teamSize: 4 | 6 | 10;
+  matchMode: MatchMode;
+  teamSize: 4 | 5 | 6 | 10;
   scoreLimit: 25 | 50 | 75;
   difficulty: Difficulty;
   startingWeapon: WeaponId;
@@ -215,6 +228,7 @@ export interface ScoreboardEntry {
   isPlayer: boolean;
   isHuman?: boolean;
   weaponId: WeaponId;
+  gunGameTier?: number;
   kills: number;
   deaths: number;
   assists: number;
@@ -277,11 +291,22 @@ export interface KillStreakHudState {
   recentBanner: string | null;
 }
 
+export interface GunGameHudState {
+  tier: number;
+  totalTiers: number;
+  currentWeaponId: WeaponId;
+  nextWeaponId: WeaponId | null;
+  leaderName: string;
+  leaderTier: number;
+}
+
 export interface HudSnapshot {
   phase: GamePhase;
   playerUsername: string;
   playerTeam: TeamId;
   mode: GameModeType;
+  matchMode: MatchMode;
+  infantryOnly: boolean;
   roomId: string;
   mpConnected: boolean;
   mpHumanCount: number;
@@ -316,6 +341,8 @@ export interface HudSnapshot {
   scoreboard: ScoreboardEntry[];
   damageIndicators: DamageDirectionIndicator[];
   winner: TeamId | 'draw' | null;
+  winnerName: string | null;
+  gunGame: GunGameHudState | null;
   pointerLocked: boolean;
   isTouchDevice: boolean;
   touchControlsActive: boolean;

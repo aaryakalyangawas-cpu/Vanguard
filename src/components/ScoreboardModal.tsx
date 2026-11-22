@@ -1,6 +1,6 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { ScoreboardEntry } from '../game/types';
+import { MatchMode, ScoreboardEntry } from '../game/types';
 import { WEAPONS } from '../game/weapons';
 
 interface ScoreboardModalProps {
@@ -8,6 +8,7 @@ interface ScoreboardModalProps {
   blueScore: number;
   redScore: number;
   scoreLimit: number;
+  matchMode?: MatchMode;
   onClose?: () => void;
 }
 
@@ -16,10 +17,14 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
   blueScore,
   redScore,
   scoreLimit,
+  matchMode = 'tdm',
   onClose,
 }) => {
+  const isFfa = matchMode === 'ffa' || matchMode === 'gun_game';
+  const isGunGame = matchMode === 'gun_game';
   const blueTeam = entries.filter((e) => e.team === 'blue');
   const redTeam = entries.filter((e) => e.team === 'red');
+  const leader = entries[0];
 
   const renderTeamTable = (title: string, colorClass: string, rows: ScoreboardEntry[]) => (
     <div className="flex-1 min-w-0 overflow-x-auto touch-pan-x">
@@ -81,19 +86,43 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
     <div className="w-full max-w-4xl mx-auto rounded-xl bg-[#0d121c]/95 border border-slate-700/80 p-3.5 sm:p-5 shadow-2xl">
       <div className="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800">
         <div>
-          <h2 className="font-display text-base sm:text-lg font-bold text-white">Team Deathmatch Standings</h2>
-          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">First team to {scoreLimit} eliminations wins</p>
+          <h2 className="font-display text-base sm:text-lg font-bold text-white">
+            {isGunGame
+              ? 'Gun Game Escalation Standings'
+              : isFfa
+              ? 'Free-For-All Combat Standings'
+              : 'Team Deathmatch Standings'}
+          </h2>
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
+            {isGunGame
+              ? 'Eliminate foes with each weapon to unlock all 18 tiers'
+              : isFfa
+              ? `Every operator for themselves · First to ${scoreLimit} eliminations wins`
+              : `First team to ${scoreLimit} eliminations wins`}
+          </p>
         </div>
+
         <div className="flex items-center gap-3 sm:gap-5 font-mono tabular-nums">
-          <div className="text-right">
-            <div className="text-[10px] sm:text-[11px] text-blue-400">Vanguard</div>
-            <div className="text-xl sm:text-2xl font-bold text-white">{blueScore}</div>
-          </div>
-          <span className="text-slate-600 text-lg">/</span>
-          <div className="text-left">
-            <div className="text-[10px] sm:text-[11px] text-red-400">Syndicate</div>
-            <div className="text-xl sm:text-2xl font-bold text-white">{redScore}</div>
-          </div>
+          {isFfa ? (
+            <div className="text-right">
+              <div className="text-[10px] sm:text-[11px] text-amber-400 uppercase">Leader</div>
+              <div className="text-sm sm:text-lg font-bold text-white">
+                {leader ? `${leader.name} (${isGunGame ? `T${(leader.gunGameTier ?? 0) + 1}` : leader.kills})` : '—'}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="text-right">
+                <div className="text-[10px] sm:text-[11px] text-blue-400">Vanguard</div>
+                <div className="text-xl sm:text-2xl font-bold text-white">{blueScore}</div>
+              </div>
+              <span className="text-slate-600 text-lg">/</span>
+              <div className="text-left">
+                <div className="text-[10px] sm:text-[11px] text-red-400">Syndicate</div>
+                <div className="text-xl sm:text-2xl font-bold text-white">{redScore}</div>
+              </div>
+            </>
+          )}
           {onClose && (
             <button
               type="button"
@@ -107,10 +136,66 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-h-[58vh] overflow-y-auto touch-pan-y pr-1">
-        {renderTeamTable('Vanguard (Blue)', 'text-blue-400', blueTeam)}
-        {renderTeamTable('Syndicate (Red)', 'text-red-400', redTeam)}
-      </div>
+      {isFfa ? (
+        <div className="max-h-[58vh] overflow-y-auto touch-pan-y overflow-x-auto pr-1">
+          <table className="w-full min-w-[420px] text-left border-collapse">
+            <thead>
+              <tr className="text-[11px] text-slate-400 border-b border-slate-800/80">
+                <th className="py-1.5 font-medium w-10">#</th>
+                <th className="py-1.5 font-medium">Combatant</th>
+                {isGunGame && <th className="py-1.5 font-medium w-20">Tier</th>}
+                <th className="py-1.5 font-medium">Weapon</th>
+                <th className="py-1.5 font-medium text-right w-14">Kills</th>
+                <th className="py-1.5 font-medium text-right w-14">Deaths</th>
+                <th className="py-1.5 font-medium text-right w-14">K/D</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((row, index) => {
+                const kd = row.deaths === 0 ? row.kills.toFixed(2) : (row.kills / row.deaths).toFixed(2);
+                const weaponShort = WEAPONS[row.weaponId]?.shortName ?? row.weaponId;
+                return (
+                  <tr
+                    key={row.id}
+                    className={`text-xs border-b border-slate-800/50 ${
+                      row.isPlayer
+                        ? 'bg-emerald-500/15 text-white font-semibold'
+                        : index === 0
+                        ? 'bg-amber-500/10 text-amber-200'
+                        : 'text-slate-300'
+                    }`}
+                  >
+                    <td className="py-2 font-mono text-slate-400">{index + 1}</td>
+                    <td className="py-2 pr-2 truncate max-w-[160px]">
+                      {row.name}
+                      {row.isHuman && !row.isPlayer && (
+                        <span className="ml-1.5 text-[10px] font-mono text-sky-400">PLAYER</span>
+                      )}
+                      {!row.alive && (
+                        <span className="ml-1.5 text-[10px] font-normal text-slate-500">MIA</span>
+                      )}
+                    </td>
+                    {isGunGame && (
+                      <td className="py-2 font-mono text-amber-300 font-semibold">
+                        {(row.gunGameTier ?? 0) + 1} / 18
+                      </td>
+                    )}
+                    <td className="py-2 pr-2 text-[11px] text-slate-300 whitespace-nowrap">{weaponShort}</td>
+                    <td className="py-2 text-right font-mono tabular-nums font-bold">{row.kills}</td>
+                    <td className="py-2 text-right font-mono tabular-nums text-slate-400">{row.deaths}</td>
+                    <td className="py-2 text-right font-mono tabular-nums text-amber-400">{kd}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-h-[58vh] overflow-y-auto touch-pan-y pr-1">
+          {renderTeamTable('Vanguard (Blue)', 'text-blue-400', blueTeam)}
+          {renderTeamTable('Syndicate (Red)', 'text-red-400', redTeam)}
+        </div>
+      )}
     </div>
   );
 };

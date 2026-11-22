@@ -500,32 +500,82 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
           )}
         </div>
 
-        {/* Center TDM Score Bar + Operator Identity */}
+        {/* Center Mode-Aware Score Bar + Operator Identity */}
         <div className="flex flex-col items-center gap-1">
-          <div className="flex items-center gap-2 sm:gap-3 bg-[#0b0f17]/92 border border-slate-700/80 rounded-lg px-2.5 py-1 sm:px-4 sm:py-2 shadow-lg">
-            <div className="flex items-center gap-1.5 sm:gap-2.5">
-              <span className="hidden sm:inline text-xs font-medium text-blue-400">Vanguard</span>
-              <span className="font-mono text-lg sm:text-2xl font-bold text-blue-400 sm:text-white tabular-nums">
-                {hud.blueScore}
-              </span>
-            </div>
-
-            <div className="px-2 sm:px-3 border-x border-slate-700/80 text-center">
-              <div className="font-mono text-xs sm:text-base font-semibold text-slate-100 tabular-nums">
-                {formatClock(hud.timeRemaining)}
+          {hud.matchMode === 'gun_game' && hud.gunGame ? (
+            <div className="flex items-center gap-2.5 sm:gap-4 bg-[#0b0f17]/92 border border-amber-500/50 rounded-lg px-3 py-1 sm:px-4 sm:py-2 shadow-lg">
+              <div className="text-left">
+                <div className="text-[10px] font-mono text-amber-400 uppercase">Tier {hud.gunGame.tier}/{hud.gunGame.totalTiers}</div>
+                <div className="text-xs sm:text-sm font-display font-bold text-white">
+                  {activeSpec.shortName}
+                </div>
               </div>
-              <div className="hidden sm:block text-[10px] text-slate-400 font-mono tabular-nums">
-                Target {hud.scoreLimit}
+              <div className="px-2 sm:px-3 border-x border-slate-700/80 text-center">
+                <div className="font-mono text-xs sm:text-base font-semibold text-slate-100 tabular-nums">
+                  {formatClock(hud.timeRemaining)}
+                </div>
+                <div className="hidden sm:block text-[10px] text-slate-400 font-mono">
+                  Next: {hud.gunGame.nextWeaponId ? WEAPONS[hud.gunGame.nextWeaponId]?.shortName : 'FINAL KILL'}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] font-mono text-emerald-400 uppercase">Leader</div>
+                <div className="text-xs sm:text-sm font-mono font-bold text-white truncate max-w-[100px]">
+                  {hud.gunGame.leaderName} · T{hud.gunGame.leaderTier}
+                </div>
               </div>
             </div>
-
-            <div className="flex items-center gap-1.5 sm:gap-2.5">
-              <span className="font-mono text-lg sm:text-2xl font-bold text-red-400 sm:text-white tabular-nums">
-                {hud.redScore}
-              </span>
-              <span className="hidden sm:inline text-xs font-medium text-red-400">Syndicate</span>
+          ) : hud.matchMode === 'ffa' ? (
+            <div className="flex items-center gap-2.5 sm:gap-4 bg-[#0b0f17]/92 border border-slate-700/80 rounded-lg px-3 py-1 sm:px-4 sm:py-2 shadow-lg">
+              <div className="text-left">
+                <div className="text-[10px] font-mono text-emerald-400 uppercase">You</div>
+                <div className="font-mono text-lg sm:text-2xl font-bold text-white tabular-nums">
+                  {hud.scoreboard.find((e) => e.isPlayer)?.kills ?? 0}
+                </div>
+              </div>
+              <div className="px-2 sm:px-3 border-x border-slate-700/80 text-center">
+                <div className="font-mono text-xs sm:text-base font-semibold text-slate-100 tabular-nums">
+                  {formatClock(hud.timeRemaining)}
+                </div>
+                <div className="hidden sm:block text-[10px] text-slate-400 font-mono tabular-nums">
+                  FFA Target {hud.scoreLimit}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] font-mono text-amber-400 uppercase truncate max-w-[90px]">
+                  {hud.scoreboard[0]?.name || 'Leader'}
+                </div>
+                <div className="font-mono text-lg sm:text-2xl font-bold text-amber-300 tabular-nums">
+                  {hud.scoreboard[0]?.kills ?? 0}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-center gap-2 sm:gap-3 bg-[#0b0f17]/92 border border-slate-700/80 rounded-lg px-2.5 py-1 sm:px-4 sm:py-2 shadow-lg">
+              <div className="flex items-center gap-1.5 sm:gap-2.5">
+                <span className="hidden sm:inline text-xs font-medium text-blue-400">Vanguard</span>
+                <span className="font-mono text-lg sm:text-2xl font-bold text-blue-400 sm:text-white tabular-nums">
+                  {hud.blueScore}
+                </span>
+              </div>
+
+              <div className="px-2 sm:px-3 border-x border-slate-700/80 text-center">
+                <div className="font-mono text-xs sm:text-base font-semibold text-slate-100 tabular-nums">
+                  {formatClock(hud.timeRemaining)}
+                </div>
+                <div className="hidden sm:block text-[10px] text-slate-400 font-mono tabular-nums">
+                  Target {hud.scoreLimit}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 sm:gap-2.5">
+                <span className="font-mono text-lg sm:text-2xl font-bold text-red-400 sm:text-white tabular-nums">
+                  {hud.redScore}
+                </span>
+                <span className="hidden sm:inline text-xs font-medium text-red-400">Syndicate</span>
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-wrap justify-center items-center gap-1.5 text-[10px] sm:text-[11px]">
             <span className="hidden sm:inline px-2 py-0.5 rounded bg-[#0b0f17]/88 border border-slate-700 text-slate-200 font-medium">
@@ -584,22 +634,39 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
           </div>
 
           <div className="w-40 sm:w-68 flex flex-col items-end gap-1">
-            {hud.killFeed.slice(0, isTouch ? 3 : 5).map((item) => (
-              <div
-                key={item.id}
-                className="max-w-full px-2 py-0.5 sm:px-2.5 sm:py-1 rounded bg-[#0b0f17]/88 border border-slate-800/90 text-[10px] sm:text-xs flex items-center gap-1 truncate"
-              >
-                <span className={`truncate max-w-[60px] sm:max-w-none ${item.killerTeam === 'blue' ? 'text-blue-400 font-semibold' : 'text-red-400 font-semibold'}`}>
-                  {item.killerName}
-                </span>
-                <span className="text-slate-400 font-mono text-[9px] sm:text-[11px] shrink-0">
-                  [{item.weaponShort}{item.isHeadshot ? ' HS' : ''}]
-                </span>
-                <span className={`truncate max-w-[60px] sm:max-w-none ${item.victimTeam === 'blue' ? 'text-blue-400 font-semibold' : 'text-red-400 font-semibold'}`}>
-                  {item.victimName}
-                </span>
-              </div>
-            ))}
+            {hud.killFeed.slice(0, isTouch ? 3 : 5).map((item) => {
+              const isFfaMode = hud.matchMode !== 'tdm';
+              const killerCls = isFfaMode
+                ? item.killerName === hud.playerUsername
+                  ? 'text-emerald-400 font-semibold'
+                  : 'text-amber-300 font-semibold'
+                : item.killerTeam === 'blue'
+                ? 'text-blue-400 font-semibold'
+                : 'text-red-400 font-semibold';
+              const victimCls = isFfaMode
+                ? item.victimName === hud.playerUsername
+                  ? 'text-emerald-400 font-semibold'
+                  : 'text-slate-300 font-semibold'
+                : item.victimTeam === 'blue'
+                ? 'text-blue-400 font-semibold'
+                : 'text-red-400 font-semibold';
+              return (
+                <div
+                  key={item.id}
+                  className="max-w-full px-2 py-0.5 sm:px-2.5 sm:py-1 rounded bg-[#0b0f17]/88 border border-slate-800/90 text-[10px] sm:text-xs flex items-center gap-1 truncate"
+                >
+                  <span className={`truncate max-w-[60px] sm:max-w-none ${killerCls}`}>
+                    {item.killerName}
+                  </span>
+                  <span className="text-slate-400 font-mono text-[9px] sm:text-[11px] shrink-0">
+                    [{item.weaponShort}{item.isHeadshot ? ' HS' : ''}]
+                  </span>
+                  <span className={`truncate max-w-[60px] sm:max-w-none ${victimCls}`}>
+                    {item.victimName}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -607,7 +674,15 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
       {/* Desktop Keyboard Interact Prompts (Touch uses interactive CTA in MobileControls) */}
       {!isTouch && hud.isAlive && hud.arsenal.nearPrompt && !hud.arsenal.isOpen && (
         <div className="absolute bottom-36 left-1/2 -translate-x-1/2 px-4 py-2 rounded-md bg-[#0b0f17]/95 border border-cyan-400/75 text-xs font-medium text-cyan-200 shadow-lg">
-          Press <span className="font-mono font-bold text-cyan-400">[E]</span> to Open {hud.arsenal.arsenalName} (Change Weapons &amp; Resupply)
+          {hud.matchMode === 'gun_game' ? (
+            <>
+              Press <span className="font-mono font-bold text-cyan-400">[E]</span> at {hud.arsenal.arsenalName} to Refill Current Tier Ammo &amp; Frags
+            </>
+          ) : (
+            <>
+              Press <span className="font-mono font-bold text-cyan-400">[E]</span> to Open {hud.arsenal.arsenalName} (Change Weapons &amp; Resupply)
+            </>
+          )}
         </div>
       )}
 
@@ -749,7 +824,7 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
             </div>
           )}
 
-          {!isMounted && (!inVehicle || inPassengerPort) && (
+          {!isMounted && (!inVehicle || inPassengerPort) && hud.matchMode !== 'gun_game' && (
             <div className="flex items-center gap-1">
               {hud.loadout.map((wid, idx) => {
                 const spec = WEAPONS[wid] || WEAPONS.m4a1;
@@ -899,12 +974,14 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
                 </div>
               )}
 
-              <div className="px-3 py-1 rounded bg-[#0b0f17]/88 border border-slate-700/75 text-xs flex items-center gap-1.5">
-                <span className="text-slate-300">Belts</span>
-                <span className={`font-mono font-bold tabular-nums ${hud.carriedBelts === 0 ? 'text-red-400' : 'text-amber-300'}`}>
-                  {hud.carriedBelts}/{hud.maxCarriedBelts}
-                </span>
-              </div>
+              {!hud.infantryOnly && (
+                <div className="px-3 py-1 rounded bg-[#0b0f17]/88 border border-slate-700/75 text-xs flex items-center gap-1.5">
+                  <span className="text-slate-300">Belts</span>
+                  <span className={`font-mono font-bold tabular-nums ${hud.carriedBelts === 0 ? 'text-red-400' : 'text-amber-300'}`}>
+                    {hud.carriedBelts}/{hud.maxCarriedBelts}
+                  </span>
+                </div>
+              )}
 
               <div
                 className={`px-3 py-1 rounded border text-xs flex items-center gap-2 ${
@@ -1190,33 +1267,52 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
               </div>
             )}
 
-            {/* Carried 3-Slot Strip */}
+            {/* Carried 3-Slot Strip OR Gun Game Progression Strip */}
             {!isMounted && (!inVehicle || inPassengerPort) && (
-              <div className="flex items-center gap-1.5 justify-end pointer-events-auto">
-                {hud.loadout.map((wid, idx) => {
-                  const spec = WEAPONS[wid] || WEAPONS.m4a1;
-                  const st = hud.weaponStates[wid] || { id: wid, mag: spec.magSize, reserve: spec.reserveMax };
-                  const selected = idx === hud.activeSlot;
-                  return (
-                    <button
-                      key={`${idx}-${wid}`}
-                      type="button"
-                      onClick={() => onSelectSlot(idx as 0 | 1 | 2)}
-                      className={`px-2.5 py-1 rounded border text-[11px] transition-colors whitespace-nowrap cursor-pointer ${
-                        selected
-                          ? 'bg-amber-500/20 border-amber-400 text-white'
-                          : 'bg-[#0b0f17]/88 border-slate-800 text-slate-400 hover:border-slate-600'
-                      }`}
-                    >
-                      <span className="font-mono font-semibold text-amber-400 mr-1.5">{idx + 1}</span>
-                      <span className="font-medium">{spec.shortName}</span>
-                      <span className="font-mono text-[10px] ml-1.5 opacity-75 tabular-nums">
-                        {st.mag}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              hud.matchMode === 'gun_game' && hud.gunGame ? (
+                <div className="w-76 px-3 py-2 rounded-lg bg-[#0b0f17]/90 border border-amber-500/45 text-xs">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-mono font-bold text-amber-400">
+                      TIER {hud.gunGame.tier} / {hud.gunGame.totalTiers}
+                    </span>
+                    <span className="font-mono text-[11px] text-slate-300">
+                      Next: {hud.gunGame.nextWeaponId ? WEAPONS[hud.gunGame.nextWeaponId]?.shortName : 'VICTORY'}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-sm overflow-hidden">
+                    <div
+                      className="h-full bg-amber-400"
+                      style={{ width: `${Math.round((hud.gunGame.tier / hud.gunGame.totalTiers) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 justify-end pointer-events-auto">
+                  {hud.loadout.map((wid, idx) => {
+                    const spec = WEAPONS[wid] || WEAPONS.m4a1;
+                    const st = hud.weaponStates[wid] || { id: wid, mag: spec.magSize, reserve: spec.reserveMax };
+                    const selected = idx === hud.activeSlot;
+                    return (
+                      <button
+                        key={`${idx}-${wid}`}
+                        type="button"
+                        onClick={() => onSelectSlot(idx as 0 | 1 | 2)}
+                        className={`px-2.5 py-1 rounded border text-[11px] transition-colors whitespace-nowrap cursor-pointer ${
+                          selected
+                            ? 'bg-amber-500/20 border-amber-400 text-white'
+                            : 'bg-[#0b0f17]/88 border-slate-800 text-slate-400 hover:border-slate-600'
+                        }`}
+                      >
+                        <span className="font-mono font-semibold text-amber-400 mr-1.5">{idx + 1}</span>
+                        <span className="font-medium">{spec.shortName}</span>
+                        <span className="font-mono text-[10px] ml-1.5 opacity-75 tabular-nums">
+                          {st.mag}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )
             )}
           </div>
         </>
@@ -1234,6 +1330,7 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
               blueScore={hud.blueScore}
               redScore={hud.redScore}
               scoreLimit={hud.scoreLimit}
+              matchMode={hud.matchMode}
               onClose={isTouch ? onToggleScoreboard : undefined}
             />
           </div>

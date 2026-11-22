@@ -19,6 +19,7 @@ const ACCOUNT_STORAGE_KEY = 'vanguard_arena_account_v1';
 
 const DEFAULT_CONFIG: MatchConfig = {
   mapId: 'yard',
+  matchMode: 'tdm',
   teamSize: 10,
   scoreLimit: 50,
   difficulty: 'tactical',
@@ -47,7 +48,15 @@ function loadInitialConfig(): MatchConfig {
     if (!WEAPONS[merged.startingSecondary]) merged.startingSecondary = 'deagle50';
     if (!WEAPONS[merged.startingHeavy]) merged.startingHeavy = 'fgm148_javelin';
     if (!MAPS[merged.mapId]) merged.mapId = 'yard';
-    if (merged.teamSize !== 4 && merged.teamSize !== 6 && merged.teamSize !== 10) {
+    if (merged.matchMode !== 'tdm' && merged.matchMode !== 'ffa' && merged.matchMode !== 'gun_game') {
+      merged.matchMode = 'tdm';
+    }
+    if (
+      merged.teamSize !== 4 &&
+      merged.teamSize !== 5 &&
+      merged.teamSize !== 6 &&
+      merged.teamSize !== 10
+    ) {
       merged.teamSize = 10;
     }
     if (merged.scoreLimit !== 25 && merged.scoreLimit !== 50 && merged.scoreLimit !== 75) {
@@ -97,6 +106,7 @@ export default function App() {
 
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [showScoreboard, setShowScoreboard] = useState(false);
+  const [inspecting3D, setInspecting3D] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const statsSubmittedForMatchRef = useRef(false);
 
@@ -194,8 +204,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: account.email,
-          kills: selfEntry.kills,
-          deaths: selfEntry.deaths,
+          killsDelta: selfEntry.kills,
+          deathsDelta: selfEntry.deaths,
         }),
       })
         .then((r) => (r.ok ? r.json() : null))
@@ -218,6 +228,7 @@ export default function App() {
   const handleStartMatch = useCallback(() => {
     setShowScoreboard(false);
     setShowAccountModal(false);
+    setInspecting3D(false);
     engineRef.current?.startNewMatch(configRef.current);
   }, []);
 
@@ -231,6 +242,7 @@ export default function App() {
 
   const handleReturnToLobby = useCallback(() => {
     setShowScoreboard(false);
+    setInspecting3D(false);
     engineRef.current?.returnToLobby();
   }, []);
 
@@ -395,6 +407,17 @@ export default function App() {
           hud={hud}
           config={config}
           account={account}
+          inspecting3D={inspecting3D}
+          onToggleInspect3D={() => {
+            setInspecting3D((prev) => {
+              const next = !prev;
+              engineRef.current?.setLobbyInspecting(next);
+              return next;
+            });
+          }}
+          onLobbyDrag={(dx, dy) => engineRef.current?.setLobbyCameraDrag(dx, dy)}
+          onLobbyZoom={(delta) => engineRef.current?.setLobbyCameraZoom(delta)}
+          onLobbyPreset={(preset) => engineRef.current?.setLobbyCameraPreset(preset)}
           onOpenAccount={() => setShowAccountModal(true)}
           onUpdateConfig={handleUpdateConfig}
           onStartMatch={handleStartMatch}

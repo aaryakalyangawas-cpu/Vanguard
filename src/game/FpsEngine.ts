@@ -9,6 +9,7 @@ import {
   ExplosiveBarrelNode,
   groundHeightAt,
   HangarNode,
+  MAPS,
   MountedMgNode,
   resolveHorizontalCollision,
   VehicleNode,
@@ -16,6 +17,7 @@ import {
 import { soundEngine } from './audio';
 import { buildCombatantRig, CombatantRig } from './botModel';
 import {
+  JoinedRoomInfo,
   MultiplayerClient,
   RemoteAirstrikeMsg,
   RemoteBarrelDamageMsg,
@@ -42,6 +44,7 @@ import {
   DamageDirectionIndicator,
   Difficulty,
   GamePhase,
+  GunGameHudState,
   HudSnapshot,
   KillFeedItem,
   LoadoutSlots,
@@ -55,6 +58,27 @@ import {
   WeaponRuntimeState,
 } from './types';
 import { buildWeaponViewmodel, ViewmodelHandle, WEAPON_ORDER, WEAPONS } from './weapons';
+
+export const GUN_GAME_LADDER: WeaponId[] = [
+  'glock19',
+  'deagle50',
+  'mp5',
+  'p90',
+  'vector45',
+  'm870',
+  'aa12',
+  'famas_f1',
+  'm4a1',
+  'akm',
+  'rpk74',
+  'mg42',
+  'scar_h',
+  'svd_dragunov',
+  'm24',
+  'awm',
+  'rpg7',
+  'usp45',
+];
 
 const BLUE_CALLSIGNS = [
   'Vanguard-1',
@@ -235,6 +259,7 @@ interface CombatantActor {
   kills: number;
   deaths: number;
   assists: number;
+  gunGameTier: number;
   lastDamagedBy: Record<string, number>;
   rig?: CombatantRig;
   waypointIdx: number;
@@ -286,7 +311,13 @@ export class FpsEngine {
   private disposed = false;
   private lastTime = performance.now();
   private hudEmitAccum = 0;
-  private lobbyOrbitAngle = 0;
+  private lobbyInspecting = false;
+  private lobbyCameraMode: 'orbit' | 'overview' | 'zone_a' | 'zone_b' | 'zone_c' | 'arsenal' = 'orbit';
+  private lobbyYaw = 0.65;
+  private lobbyPitch = 0.46;
+  private lobbyZoom = 1.0;
+  private lobbyCurrentCamPos = new THREE.Vector3(120, 62, 120);
+  private lobbyCurrentLook = new THREE.Vector3(0, 3, 0);
 
   // Match state
   private phase: GamePhase = 'lobby';
@@ -295,6 +326,7 @@ export class FpsEngine {
   private redScore = 0;
   private timeRemaining = 360;
   private winner: TeamId | 'draw' | null = null;
+  private winnerName: string | null = null;
   private killFeed: KillFeedItem[] = [];
   private killFeedSeq = 1;
   private damageIndicators: DamageDirectionIndicator[] = [];
@@ -684,14 +716,75 @@ export class FpsEngine {
     return vm;
   }
 
+  private isFfaLike(): boolean {
+    return this.config.matchMode === 'ffa' || this.config.matchMode === 'gun_game';
+  }
+
+  private promoteGunGameActor(actor: CombatantActor): boolean {
+    if (this.config.matchMode !== 'gun_game') return false;
+    actor.gunGameTier += 1;
+    if (actor.gunGameTier >= GUN_GAME_LADDER.length) {
+      return true;
+    }
+    const nextWid = GUN_GAME_LADDER[actor.gunGameTier];
+    actor.weaponId = nextWid;
+    if (actor.isPlayer) {
+      this.loadout = [nextWid, nextWid, nextWid];
+      this.weaponStates[nextWid] = {
+        id: nextWid,
+        mag: WEAPONS[nextWid].magSize,
+        reserve: WEAPONS[nextWid].reserveMax,
+      };
+      this.selectSlot(0, true);
+      this.weaponKickZ = 0.08;
+      this.weaponKickRotX = -0.18;
+      soundEngine.playStreakCue(2);
+      this.streakBanner = `TIER ${actor.gunGameTier + 1}/${GUN_GAME_LADDER.length} · ${WEAPONS[nextWid].name.toUpperCase()}`;
+      this.streakBannerTimer = 3.2;
+    }
+    return false;
+  }
+
   private setupMultiplayerHandlers() {
     this.mpClient.setCallbacks({
       onConnectionChange: (connected) => {
         this.mpConnected = connected;
         this.emitHud();
       },
-      onJoined: () => {
+      onJoined: (info: JoinedRoomInfo) => {
         this.mpConnected = true;
+        const mapChanged = this.arena.mapId !== info.mapId;
+        const rulesChanged =
+          this.config.matchMode !== info.matchMode ||
+          this.config.teamSize !== info.teamSize ||
+          this.config.botFill !== info.botFill;
+        this.config.mapId = info.mapId;
+        this.config.matchMode = info.matchMode;
+        this.config.teamSize = info.teamSize;
+        this.config.scoreLimit = info.scoreLimit;
+        this.config.botFill = info.botFill;
+
+        if (mapChanged) {
+          this.loadArena(info.mapId);
+          this.resetMountedMgs();
+          this.resetVehicles();
+          this.resetDestructibles();
+        }
+        if (mapChanged || rulesChanged) {
+          this.setupMatchActors();
+        }
+        if (info.matchMode === 'gun_game' && this.player) {
+          const w0 = GUN_GAME_LADDER[0];
+          this.loadout = [w0, w0, w0];
+          this.player.gunGameTier = 0;
+          this.player.weaponId = w0;
+          this.weaponStates[w0] = {
+            id: w0,
+            mag: WEAPONS[w0].magSize,
+            reserve: WEAPONS[w0].reserveMax,
+          };
+          this.selectSlot(0, true);
+        }
         this.emitHud();
       },
       onSnapshot: (snap) => this.handleMultiplayerSnapshot(snap),
@@ -715,18 +808,24 @@ export class FpsEngine {
     this.redScore = snap.redScore;
     this.timeRemaining = snap.timeRemaining;
     this.mpHumanCount = snap.players.length;
+    const isFfa = this.isFfaLike();
 
     const myId = this.mpClient.playerId;
     const activeIds = new Set<string>();
 
     for (const rp of snap.players) {
-      if (rp.id === myId) continue;
+      if (rp.id === myId) {
+        if (this.player && this.config.matchMode === 'gun_game' && (rp.gunGameTier ?? 0) > this.player.gunGameTier) {
+          this.player.gunGameTier = rp.gunGameTier ?? 0;
+        }
+        continue;
+      }
       const actorId = `hum-${rp.id}`;
       activeIds.add(actorId);
 
       let actor = this.actors.find((a) => a.id === actorId);
       if (!actor) {
-        const rig = buildCombatantRig(actorId, rp.team, rp.weaponId, rp.username, true);
+        const rig = buildCombatantRig(actorId, rp.team, rp.weaponId, rp.username, true, isFfa);
         rig.root.position.set(rp.x, rp.y, rp.z);
         this.scene.add(rig.root);
         actor = {
@@ -750,6 +849,7 @@ export class FpsEngine {
           kills: rp.kills,
           deaths: rp.deaths,
           assists: 0,
+          gunGameTier: rp.gunGameTier ?? 0,
           lastDamagedBy: {},
           rig,
           waypointIdx: 0,
@@ -774,6 +874,7 @@ export class FpsEngine {
         actor.alive = rp.alive;
         actor.kills = rp.kills;
         actor.deaths = rp.deaths;
+        actor.gunGameTier = rp.gunGameTier ?? actor.gunGameTier;
         actor.vehicleId = rp.vehicleId;
         actor.vehicleSeat = rp.vehicleSeat;
         actor.velocity.set(rp.vx, 0, rp.vz);
@@ -832,8 +933,23 @@ export class FpsEngine {
       }
     }
 
-    if (this.blueScore >= this.config.scoreLimit || this.redScore >= this.config.scoreLimit) {
+    if (snap.winnerName) {
+      this.winnerName = snap.winnerName;
       this.endMatch();
+    } else if (this.config.matchMode === 'tdm' && (this.blueScore >= this.config.scoreLimit || this.redScore >= this.config.scoreLimit)) {
+      this.endMatch();
+    } else if (this.config.matchMode === 'ffa') {
+      const ffaWin = this.actors.find((a) => a.kills >= this.config.scoreLimit);
+      if (ffaWin) {
+        this.winnerName = ffaWin.name;
+        this.endMatch();
+      }
+    } else if (this.config.matchMode === 'gun_game') {
+      const ggWin = this.actors.find((a) => a.gunGameTier >= GUN_GAME_LADDER.length);
+      if (ggWin) {
+        this.winnerName = ggWin.name;
+        this.endMatch();
+      }
     }
   }
 
@@ -1056,10 +1172,23 @@ export class FpsEngine {
       'm24',
     ];
 
+    const isFfa = this.isFfaLike();
+    const isGunGame = this.config.matchMode === 'gun_game';
+    if (isGunGame) {
+      const startW = GUN_GAME_LADDER[0];
+      this.loadout = [startW, startW, startW];
+    }
+
     const playerTeam: TeamId = this.config.playerTeam || 'blue';
-    const playerSpawns = playerTeam === 'blue' ? this.arena.blueSpawns : this.arena.redSpawns;
+    const allSpawns = [...this.arena.blueSpawns, ...this.arena.redSpawns];
+    const playerSpawns = isFfa ? allSpawns : playerTeam === 'blue' ? this.arena.blueSpawns : this.arena.redSpawns;
     const playerSpawn = playerSpawns[0];
     const displayName = (this.config.username || 'Vanguard-1').trim().slice(0, 18) || 'Vanguard-1';
+    const playerYaw = isFfa
+      ? Math.atan2(playerSpawn.x, playerSpawn.z)
+      : playerTeam === 'blue'
+      ? 0
+      : Math.PI;
 
     this.player = {
       id: 'player',
@@ -1070,7 +1199,7 @@ export class FpsEngine {
       weaponId: this.loadout[0],
       position: playerSpawn.clone(),
       velocity: new THREE.Vector3(),
-      yaw: playerTeam === 'blue' ? 0 : Math.PI,
+      yaw: playerYaw,
       pitch: 0,
       health: 100,
       maxHealth: 100,
@@ -1080,6 +1209,7 @@ export class FpsEngine {
       kills: 0,
       deaths: 0,
       assists: 0,
+      gunGameTier: 0,
       lastDamagedBy: {},
       waypointIdx: 2,
       strafeDir: 1,
@@ -1101,7 +1231,55 @@ export class FpsEngine {
         : this.config.teamSize
       : 0;
 
-    if (shouldSpawnBots) {
+    if (shouldSpawnBots && isFfa) {
+      const ffaBotCount = Math.min(15, Math.max(3, teamSize * 2 - 1));
+      const ffaNames = [...BLUE_CALLSIGNS.slice(1), ...RED_CALLSIGNS];
+      for (let i = 0; i < ffaBotCount; i++) {
+        const wid = isGunGame ? GUN_GAME_LADDER[0] : botPool[i % botPool.length];
+        const spawn = allSpawns[(i * 3 + 2) % allSpawns.length].clone();
+        spawn.x += ((i % 3) - 1) * 1.4;
+        const callsign = ffaNames[i % ffaNames.length];
+        const botTeam: TeamId = i % 2 === 0 ? 'red' : 'blue';
+        const rig = buildCombatantRig(`ffa-${i}`, botTeam, wid, callsign, false, true);
+        const yaw = Math.atan2(spawn.x, spawn.z);
+        rig.root.position.copy(spawn);
+        rig.root.rotation.y = yaw;
+        this.scene.add(rig.root);
+        this.actors.push({
+          id: `ffa-${i}`,
+          name: callsign,
+          team: botTeam,
+          isPlayer: false,
+          isHuman: false,
+          weaponId: wid,
+          position: spawn,
+          velocity: new THREE.Vector3(),
+          yaw,
+          pitch: 0,
+          health: 100,
+          maxHealth: 100,
+          alive: true,
+          respawnTimer: 0,
+          spawnShieldTimer: 1.5,
+          kills: 0,
+          deaths: 0,
+          assists: 0,
+          gunGameTier: 0,
+          lastDamagedBy: {},
+          rig,
+          waypointIdx: Math.floor(Math.random() * this.arena.waypoints.length),
+          strafeDir: Math.random() > 0.5 ? 1 : -1,
+          strafeTimer: 1.2 + Math.random(),
+          fireCooldown: 0.4,
+          grenadeCooldown: 6 + Math.random() * 8,
+          reactionTimer: 0.25,
+          losTimer: Math.random() * 0.14,
+          targetEnemyId: null,
+          deathAnimTimer: 0,
+          walkCycle: Math.random() * 6,
+        });
+      }
+    } else if (shouldSpawnBots) {
       const blueBotCount = playerTeam === 'blue' ? teamSize - 1 : teamSize;
       const redBotCount = playerTeam === 'red' ? teamSize - 1 : teamSize;
 
@@ -1109,7 +1287,7 @@ export class FpsEngine {
         const wid = botPool[i % botPool.length];
         const spawn = this.arena.blueSpawns[(i + 1) % this.arena.blueSpawns.length];
         const callsign = BLUE_CALLSIGNS[(i + 1) % BLUE_CALLSIGNS.length];
-        const rig = buildCombatantRig(`blue-${i}`, 'blue', wid, callsign, false);
+        const rig = buildCombatantRig(`blue-${i}`, 'blue', wid, callsign, false, false);
         rig.root.position.copy(spawn);
         this.scene.add(rig.root);
         this.actors.push({
@@ -1131,6 +1309,7 @@ export class FpsEngine {
           kills: 0,
           deaths: 0,
           assists: 0,
+          gunGameTier: 0,
           lastDamagedBy: {},
           rig,
           waypointIdx: Math.floor(Math.random() * this.arena.waypoints.length),
@@ -1150,7 +1329,7 @@ export class FpsEngine {
         const wid = botPool[(i + 3) % botPool.length];
         const spawn = this.arena.redSpawns[(i + 1) % this.arena.redSpawns.length];
         const callsign = RED_CALLSIGNS[i % RED_CALLSIGNS.length];
-        const rig = buildCombatantRig(`red-${i}`, 'red', wid, callsign, false);
+        const rig = buildCombatantRig(`red-${i}`, 'red', wid, callsign, false, false);
         rig.root.position.copy(spawn);
         rig.root.rotation.y = Math.PI;
         this.scene.add(rig.root);
@@ -1173,6 +1352,7 @@ export class FpsEngine {
           kills: 0,
           deaths: 0,
           assists: 0,
+          gunGameTier: 0,
           lastDamagedBy: {},
           rig,
           waypointIdx: Math.floor(Math.random() * this.arena.waypoints.length),
@@ -1212,17 +1392,53 @@ export class FpsEngine {
     this.emitHud();
   }
 
+  public setLobbyInspecting(inspecting: boolean) {
+    this.lobbyInspecting = inspecting;
+    if (!inspecting && this.lobbyCameraMode !== 'orbit') {
+      this.lobbyZoom = 1.0;
+    }
+  }
+
+  public setLobbyCameraPreset(
+    preset: 'orbit' | 'overview' | 'zone_a' | 'zone_b' | 'zone_c' | 'arsenal'
+  ) {
+    this.lobbyCameraMode = preset;
+    this.lobbyZoom = 1.0;
+    if (preset === 'overview') {
+      this.lobbyPitch = 0.72;
+    } else if (preset === 'orbit') {
+      this.lobbyPitch = 0.46;
+    } else {
+      this.lobbyPitch = 0.42;
+    }
+  }
+
+  public setLobbyCameraDrag(dx: number, dy: number) {
+    if (this.phase !== 'lobby' && this.phase !== 'ended') return;
+    this.lobbyYaw -= dx * 0.0055;
+    this.lobbyPitch = THREE.MathUtils.clamp(this.lobbyPitch + dy * 0.0042, 0.14, 1.32);
+  }
+
+  public setLobbyCameraZoom(delta: number) {
+    if (this.phase !== 'lobby' && this.phase !== 'ended') return;
+    this.lobbyZoom = THREE.MathUtils.clamp(this.lobbyZoom + delta * 0.0012, 0.35, 1.85);
+  }
+
   public startNewMatch(nextConfig?: MatchConfig) {
     if (nextConfig) {
       this.config = { ...nextConfig };
       soundEngine.setMuted(this.config.muted);
     }
 
-    this.loadout = [
-      this.config.startingWeapon || 'm4a1',
-      this.config.startingSecondary || 'deagle50',
-      this.config.startingHeavy || 'fgm148_javelin',
-    ];
+    this.lobbyInspecting = false;
+    const isGunGame = this.config.matchMode === 'gun_game';
+    this.loadout = isGunGame
+      ? [GUN_GAME_LADDER[0], GUN_GAME_LADDER[0], GUN_GAME_LADDER[0]]
+      : [
+          this.config.startingWeapon || 'm4a1',
+          this.config.startingSecondary || 'deagle50',
+          this.config.startingHeavy || 'fgm148_javelin',
+        ];
 
     if (this.arena.mapId !== this.config.mapId) {
       this.loadArena(this.config.mapId);
@@ -1232,6 +1448,7 @@ export class FpsEngine {
     this.redScore = 0;
     this.timeRemaining = 360;
     this.winner = null;
+    this.winnerName = null;
     this.killFeed = [];
     this.damageIndicators = [];
     this.pickupNotice = null;
@@ -1271,8 +1488,8 @@ export class FpsEngine {
     this.streakBest = 0;
     this.uavActiveTimer = 0;
     this.airstrikeCharges = 1;
-    this.streakBanner = null;
-    this.streakBannerTimer = 0;
+    this.streakBanner = isGunGame ? `GUN GAME · TIER 1/${GUN_GAME_LADDER.length} (${WEAPONS[GUN_GAME_LADDER[0]].shortName})` : null;
+    this.streakBannerTimer = isGunGame ? 3.2 : 0;
     this.lockCandidateId = null;
     this.lockCandidateName = null;
     this.lockProgress = 0;
@@ -1309,6 +1526,8 @@ export class FpsEngine {
         username: this.player.name,
         team: this.player.team,
         mapId: this.config.mapId,
+        matchMode: this.config.matchMode,
+        teamSize: this.config.teamSize,
         scoreLimit: this.config.scoreLimit,
         botFill: this.config.botFill,
         weaponId: this.activeWeapon,
@@ -1745,6 +1964,9 @@ export class FpsEngine {
   }
 
   private selectSlot(slotIndex: 0 | 1 | 2, instant = false) {
+    if (this.config.matchMode === 'gun_game' && !instant && slotIndex !== 0) {
+      return;
+    }
     const targetId = this.loadout[slotIndex];
     if (this.activeSlot === slotIndex && this.activeWeapon === targetId && !instant) return;
     this.lastSlot = this.activeSlot;
@@ -2327,6 +2549,10 @@ export class FpsEngine {
   private isEnemyOccupiedVehicle(v: VehicleNode, myTeam: TeamId): boolean {
     for (const sid of v.seats) {
       if (!sid) continue;
+      if (this.isFfaLike()) {
+        if (sid !== this.player?.id) return true;
+        continue;
+      }
       const actor = this.actors.find((a) => a.id === sid);
       if (actor && actor.team !== myTeam) return true;
     }
@@ -2336,6 +2562,10 @@ export class FpsEngine {
   private isFriendlyOccupiedVehicle(v: VehicleNode, myTeam: TeamId): boolean {
     for (const sid of v.seats) {
       if (!sid) continue;
+      if (this.isFfaLike()) {
+        if (sid === this.player?.id) return true;
+        continue;
+      }
       const actor = this.actors.find((a) => a.id === sid);
       if (actor && actor.team === myTeam) return true;
     }
@@ -2359,6 +2589,23 @@ export class FpsEngine {
       return;
     }
     if (this.nearArsenalName) {
+      if (this.config.matchMode === 'gun_game') {
+        const w = WEAPONS[this.activeWeapon];
+        if (w) {
+          this.weaponStates[this.activeWeapon] = {
+            id: this.activeWeapon,
+            mag: w.magSize,
+            reserve: w.reserveMax,
+          };
+        }
+        this.grenades = this.maxGrenades;
+        this.player.health = Math.min(this.player.maxHealth, this.player.health + 25);
+        soundEngine.playPickup();
+        this.pickupNotice = 'Gun Game: Tier Swaps Locked · Ammo & Frags Refilled';
+        this.pickupNoticeTimer = 2.4;
+        this.emitHud();
+        return;
+      }
       this.arsenalOpen = true;
       this.mouseDownLeft = false;
       this.mouseDownRight = false;
@@ -2748,13 +2995,14 @@ export class FpsEngine {
       if (!otherV.destroyed && otherV !== v) aimTargets.push(...otherV.hitMeshes);
     }
     for (const a of this.actors) {
-      if (a.alive && a.team !== this.player.team && a.rig) {
+      if (a.alive && a.id !== this.player.id && (this.isFfaLike() || a.team !== this.player.team) && a.rig) {
         aimTargets.push(...a.rig.hitMeshes);
       }
     }
     for (const strike of this.airstrikes) {
       for (const jet of strike.jets) {
-        if (!jet.destroyed && jet.team !== this.player.team) {
+        const friendlyJet = this.isFfaLike() ? strike.attackerId === this.player.id : jet.team === this.player.team;
+        if (!jet.destroyed && !friendlyJet) {
           aimTargets.push(...jet.hitMeshes);
         }
       }
@@ -3105,7 +3353,7 @@ export class FpsEngine {
       if (!v.destroyed) rayTargets.push(...v.hitMeshes);
     }
     for (const a of this.actors) {
-      if (a.alive && a.team !== this.player.team && a.rig) {
+      if (a.alive && a.id !== this.player.id && (this.isFfaLike() || a.team !== this.player.team) && a.rig) {
         rayTargets.push(...a.rig.hitMeshes);
       }
     }
@@ -3755,7 +4003,7 @@ export class FpsEngine {
     weaponShort: string
   ): boolean {
     if (jet.destroyed) return false;
-    if (attacker && jet.team === attacker.team) return false;
+    if (attacker && (this.isFfaLike() ? strike.attackerId === attacker.id : jet.team === attacker.team)) return false;
 
     jet.hp = Math.max(0, jet.hp - amount);
     if (jet.hp <= 0) {
@@ -3776,8 +4024,11 @@ export class FpsEngine {
 
       if (attacker) {
         attacker.kills += 1;
-        if (attacker.team === 'blue') this.blueScore += 1;
-        else this.redScore += 1;
+        if (!this.isFfaLike()) {
+          if (attacker.team === 'blue') this.blueScore += 1;
+          else this.redScore += 1;
+        }
+        const wonGunGame = this.promoteGunGameActor(attacker);
         if (attacker.isPlayer) {
           this.registerPlayerKillStreak();
           this.lastEliminatedName = 'Strike Jet';
@@ -3786,7 +4037,7 @@ export class FpsEngine {
           this.pickupNoticeTimer = 2.6;
         }
         if (this.config.mode === 'multiplayer' && attacker.isPlayer) {
-          this.mpClient.sendBotKill(attacker.team);
+          this.mpClient.sendBotKill(attacker.team, attacker.gunGameTier);
         }
         this.killFeed.unshift({
           id: this.killFeedSeq++,
@@ -3800,7 +4051,13 @@ export class FpsEngine {
         });
         if (this.killFeed.length > 5) this.killFeed.pop();
 
-        if (this.blueScore >= this.config.scoreLimit || this.redScore >= this.config.scoreLimit) {
+        if (wonGunGame || (this.config.matchMode === 'ffa' && attacker.kills >= this.config.scoreLimit)) {
+          this.winnerName = attacker.name;
+          this.endMatch();
+        } else if (
+          this.config.matchMode === 'tdm' &&
+          (this.blueScore >= this.config.scoreLimit || this.redScore >= this.config.scoreLimit)
+        ) {
           this.endMatch();
         }
       }
@@ -3941,7 +4198,7 @@ export class FpsEngine {
 
     for (const victim of this.actors) {
       if (!victim.alive) continue;
-      if (victim.team === attacker.team && victim.id !== attacker.id) continue;
+      if (!this.isFfaLike() && victim.team === attacker.team && victim.id !== attacker.id) continue;
 
       const victimCenter = new THREE.Vector3(victim.position.x, victim.position.y + 1.05, victim.position.z);
       const dist = blastEye.distanceTo(victimCenter);
@@ -3954,7 +4211,7 @@ export class FpsEngine {
       const dmg = Math.max(10, Math.round(maxDamage * falloff * selfMult * losMult));
 
       const killed = this.applyDamage(victim, attacker, dmg, false, weaponShort);
-      if (attacker.isPlayer && victim.team !== attacker.team) {
+      if (attacker.isPlayer && victim.id !== attacker.id && (this.isFfaLike() || victim.team !== attacker.team)) {
         if (killed) {
           bestHit = 'kill';
           killedName = victim.name;
@@ -4228,7 +4485,12 @@ export class FpsEngine {
       victim.health = Math.max(0, victim.health - amount);
       if (wouldKill) {
         attacker.kills += 1;
+        const wonGunGame = this.promoteGunGameActor(attacker);
         this.registerPlayerKillStreak();
+        if (wonGunGame || (this.config.matchMode === 'ffa' && attacker.kills >= this.config.scoreLimit)) {
+          this.winnerName = attacker.name;
+          this.endMatch();
+        }
       }
       return wouldKill;
     }
@@ -4280,23 +4542,29 @@ export class FpsEngine {
         victim.vehicleSeat = null;
       }
 
+      let wonGunGame = false;
       if (victim.id !== attacker.id) {
         attacker.kills += 1;
         if (attacker.isPlayer) {
           this.registerPlayerKillStreak();
         }
-        if (attacker.team === 'blue') this.blueScore += 1;
-        else this.redScore += 1;
+        if (!this.isFfaLike()) {
+          if (attacker.team === 'blue') this.blueScore += 1;
+          else this.redScore += 1;
+        }
+        wonGunGame = this.promoteGunGameActor(attacker);
         if (this.config.mode === 'multiplayer' && !victim.isHuman && attacker.isPlayer) {
-          this.mpClient.sendBotKill(attacker.team);
+          this.mpClient.sendBotKill(attacker.team, attacker.gunGameTier);
         }
       }
 
-      for (const [otherId, ts] of Object.entries(victim.lastDamagedBy)) {
-        if (otherId !== attacker.id && now - ts < 5500) {
-          const assister = this.actors.find((a) => a.id === otherId);
-          if (assister && assister.team === attacker.team) {
-            assister.assists += 1;
+      if (!this.isFfaLike()) {
+        for (const [otherId, ts] of Object.entries(victim.lastDamagedBy)) {
+          if (otherId !== attacker.id && now - ts < 5500) {
+            const assister = this.actors.find((a) => a.id === otherId);
+            if (assister && assister.team === attacker.team) {
+              assister.assists += 1;
+            }
           }
         }
       }
@@ -4313,7 +4581,13 @@ export class FpsEngine {
       });
       if (this.killFeed.length > 5) this.killFeed.pop();
 
-      if (this.blueScore >= this.config.scoreLimit || this.redScore >= this.config.scoreLimit) {
+      if (wonGunGame || (this.config.matchMode === 'ffa' && attacker.kills >= this.config.scoreLimit)) {
+        this.winnerName = attacker.name;
+        this.endMatch();
+      } else if (
+        this.config.matchMode === 'tdm' &&
+        (this.blueScore >= this.config.scoreLimit || this.redScore >= this.config.scoreLimit)
+      ) {
         this.endMatch();
       }
       return true;
@@ -4368,23 +4642,39 @@ export class FpsEngine {
       document.exitPointerLock();
     }
 
-    if (this.blueScore > this.redScore) this.winner = 'blue';
-    else if (this.redScore > this.blueScore) this.winner = 'red';
-    else this.winner = 'draw';
+    if (this.isFfaLike()) {
+      const sorted = [...this.actors].sort(
+        (a, b) => b.gunGameTier - a.gunGameTier || b.kills - a.kills || a.deaths - b.deaths
+      );
+      const top = sorted[0];
+      this.winnerName = this.winnerName || top?.name || null;
+      this.winner = top ? top.team : 'draw';
+      soundEngine.playMatchEnd(this.winnerName === this.player?.name);
+    } else {
+      this.winnerName = null;
+      if (this.blueScore > this.redScore) this.winner = 'blue';
+      else if (this.redScore > this.blueScore) this.winner = 'red';
+      else this.winner = 'draw';
+      soundEngine.playMatchEnd(this.winner === this.player?.team);
+    }
 
-    soundEngine.playMatchEnd(this.winner === this.player?.team);
     this.emitHud();
   }
 
   private respawnActor(actor: CombatantActor) {
-    const spawns = actor.team === 'blue' ? this.arena.blueSpawns : this.arena.redSpawns;
+    const isFfa = this.isFfaLike();
+    const spawns = isFfa
+      ? [...this.arena.blueSpawns, ...this.arena.redSpawns]
+      : actor.team === 'blue'
+      ? this.arena.blueSpawns
+      : this.arena.redSpawns;
     let bestSpawn = spawns[0];
     let bestMinEnemyDist = -1;
 
     for (const sp of spawns) {
       let minDist = 9999;
       for (const other of this.actors) {
-        if (other.team !== actor.team && other.alive) {
+        if (other.alive && other.id !== actor.id && (isFfa || other.team !== actor.team)) {
           const d = sp.distanceTo(other.position);
           if (d < minDist) minDist = d;
         }
@@ -4402,16 +4692,31 @@ export class FpsEngine {
     actor.alive = true;
     actor.spawnShieldTimer = 1.4;
     actor.lastDamagedBy = {};
-    actor.yaw = actor.team === 'blue' ? 0 : Math.PI;
+    actor.yaw = isFfa
+      ? Math.atan2(actor.position.x, actor.position.z)
+      : actor.team === 'blue'
+      ? 0
+      : Math.PI;
     actor.pitch = 0;
 
     if (actor.isPlayer) {
-      for (const wid of this.loadout) {
-        this.weaponStates[wid] = {
-          id: wid,
-          mag: WEAPONS[wid].magSize,
-          reserve: WEAPONS[wid].reserveMax,
+      if (this.config.matchMode === 'gun_game') {
+        const curWid = GUN_GAME_LADDER[Math.min(actor.gunGameTier, GUN_GAME_LADDER.length - 1)];
+        this.loadout = [curWid, curWid, curWid];
+        this.weaponStates[curWid] = {
+          id: curWid,
+          mag: WEAPONS[curWid].magSize,
+          reserve: WEAPONS[curWid].reserveMax,
         };
+        this.selectSlot(0, true);
+      } else {
+        for (const wid of this.loadout) {
+          this.weaponStates[wid] = {
+            id: wid,
+            mag: WEAPONS[wid].magSize,
+            reserve: WEAPONS[wid].reserveMax,
+          };
+        }
       }
       this.grenades = 2;
       this.isCookingGrenade = false;
@@ -4740,7 +5045,8 @@ export class FpsEngine {
 
     for (const strike of this.airstrikes) {
       for (const jet of strike.jets) {
-        if (jet.destroyed || jet.team === this.player.team) continue;
+        const friendlyJet = this.isFfaLike() ? strike.attackerId === this.player.id : jet.team === this.player.team;
+        if (jet.destroyed || friendlyJet) continue;
         const toJet = jet.position.clone().sub(this.camera.position);
         const dist = toJet.length();
         if (dist > 560 || dist < 8) continue;
@@ -4758,7 +5064,7 @@ export class FpsEngine {
       if (v.destroyed) continue;
       if (this.isFriendlyOccupiedVehicle(v, this.player.team) && !this.isEnemyOccupiedVehicle(v, this.player.team)) {
         continue;
-      } else if (v.seats.every((s) => s === null) && v.teamHint === this.player.team) {
+      } else if (!this.isFfaLike() && v.seats.every((s) => s === null) && v.teamHint === this.player.team) {
         continue;
       }
       const center = new THREE.Vector3(v.position.x, v.position.y + (v.type === 'attack_heli' ? 1.8 : 1.1), v.position.z);
@@ -4775,7 +5081,7 @@ export class FpsEngine {
     }
 
     for (const a of this.actors) {
-      if (!a.alive || a.team === this.player.team) continue;
+      if (!a.alive || a.id === this.player.id || (!this.isFfaLike() && a.team === this.player.team)) continue;
       const center = new THREE.Vector3(a.position.x, a.position.y + 1.1, a.position.z);
       const toA = center.sub(this.camera.position);
       const dist = toA.length();
@@ -5315,7 +5621,7 @@ export class FpsEngine {
             if (v.seats.includes(actor.id)) continue;
             const dist = Math.hypot(actor.position.x - v.position.x, actor.position.z - v.position.z);
             if (dist < vehRadius + 0.65 && Math.abs(actor.position.y - v.position.y) < 2.2) {
-              if (actor.team !== p.team) {
+              if (this.isFfaLike() || actor.team !== p.team) {
                 const ramDmg = Math.round(absSpeed * 12);
                 const killed = this.applyDamage(
                   actor,
@@ -5950,7 +6256,7 @@ export class FpsEngine {
         let mountedTarget: CombatantActor | null = null;
         let bestDist = isHeliSeat ? 160 : 96;
         for (const other of this.actors) {
-          if (other.team === bot.team || !other.alive) continue;
+          if (!other.alive || other.id === bot.id || (!this.isFfaLike() && other.team === bot.team)) continue;
           const d = seatWorld.distanceTo(other.position);
           if (d < bestDist && this.hasLineOfSight(seatEye, _vecB.set(other.position.x, other.position.y + 1.25, other.position.z))) {
             bestDist = d;
@@ -6038,7 +6344,7 @@ export class FpsEngine {
       }
 
       // Friendly bots can board free gunner/passenger seats on active friendly vehicles
-      if (bot.team === this.player.team && Math.random() < 0.025) {
+      if (!this.isFfaLike() && bot.team === this.player.team && Math.random() < 0.025) {
         for (const v of this.arena.vehicles) {
           if (v.destroyed) continue;
           if (!this.isFriendlyOccupiedVehicle(v, bot.team) && this.activeVehicle !== v) continue;
@@ -6061,7 +6367,7 @@ export class FpsEngine {
       if (bot.losTimer <= 0) {
         bot.losTimer = 0.14 + Math.random() * 0.06;
         for (const other of this.actors) {
-          if (other.team === bot.team || !other.alive) continue;
+          if (!other.alive || other.id === bot.id || (!this.isFfaLike() && other.team === bot.team)) continue;
           const d = bot.position.distanceTo(other.position);
           if (d < nearestEnemyDist) {
             const targetEye = _vecB.set(other.position.x, other.position.y + 1.38, other.position.z);
@@ -6682,7 +6988,8 @@ export class FpsEngine {
       const jetMeshes: THREE.Object3D[] = [];
       for (const strike of this.airstrikes) {
         for (const jet of strike.jets) {
-          if (!jet.destroyed && jet.team !== b.team) {
+          const friendlyJet = this.isFfaLike() ? strike.attackerId === b.attackerId : jet.team === b.team;
+          if (!jet.destroyed && !friendlyJet) {
             jetMeshes.push(...jet.hitMeshes);
           }
         }
@@ -6727,7 +7034,7 @@ export class FpsEngine {
 
       const enemyMeshes: THREE.Object3D[] = [];
       for (const actor of this.actors) {
-        if (!actor.alive || actor.team === b.team) continue;
+        if (!actor.alive || actor.id === b.attackerId || (!this.isFfaLike() && actor.team === b.team)) continue;
         if (actor.isPlayer && this.activeVehicle && this.activeVehicleSeat < 2) continue;
         if (actor.isPlayer) {
           const pCenter = _vecC.set(actor.position.x, actor.position.y + 1.12, actor.position.z);
@@ -6952,7 +7259,8 @@ export class FpsEngine {
         const guideTargets: THREE.Object3D[] = [...this.arena.staticRayMeshes];
         for (const strike of this.airstrikes) {
           for (const jet of strike.jets) {
-            if (!jet.destroyed && jet.team !== r.team) guideTargets.push(...jet.hitMeshes);
+            const friendlyJet = this.isFfaLike() ? strike.attackerId === r.attackerId : jet.team === r.team;
+            if (!jet.destroyed && !friendlyJet) guideTargets.push(...jet.hitMeshes);
           }
         }
         this.raycaster.set(this.camera.position, camDir);
@@ -6983,7 +7291,8 @@ export class FpsEngine {
       // Anti-Air proximity & direct fuse against Enemy Air Strike Jets (4.2m VT proximity fuze)
       for (const strike of this.airstrikes) {
         for (const jet of strike.jets) {
-          if (jet.destroyed || jet.team === r.team) continue;
+          const friendlyJet = this.isFfaLike() ? strike.attackerId === r.attackerId : jet.team === r.team;
+          if (jet.destroyed || friendlyJet) continue;
           lineSeg.set(r.pos, nextPos);
           lineSeg.closestPointToPoint(jet.position, true, closestPt);
           if (closestPt.distanceToSquared(jet.position) < 4.2 * 4.2) {
@@ -7256,15 +7565,54 @@ export class FpsEngine {
     this.lastTime = now;
 
     if (this.phase === 'lobby' || this.phase === 'ended') {
-      this.lobbyOrbitAngle += dt * 0.1;
-      const radius = this.arena.halfSize > 600 ? 480 : this.arena.halfSize > 250 ? 250 : 140;
-      const orbitY = this.arena.halfSize > 600 ? 155 : 88;
-      this.camera.position.set(
-        Math.cos(this.lobbyOrbitAngle) * radius,
-        orbitY,
-        Math.sin(this.lobbyOrbitAngle) * radius
+      if (this.lobbyCameraMode === 'orbit') {
+        this.lobbyYaw += dt * (this.lobbyInspecting ? 0.04 : 0.09);
+      }
+
+      const baseRadius =
+        this.arena.halfSize > 600
+          ? 440
+          : this.arena.halfSize > 250
+          ? 230
+          : this.arena.halfSize > 110
+          ? 135
+          : 78;
+
+      const desiredTarget = new THREE.Vector3(0, 3.0, 0);
+      let presetRadius = baseRadius;
+      if (this.lobbyCameraMode === 'overview') {
+        presetRadius = baseRadius * 1.18;
+      } else if (this.lobbyCameraMode === 'zone_a' && this.arena.zones[0]) {
+        const z = this.arena.zones[0];
+        desiredTarget.set(z.centerX, 4, z.centerZ);
+        presetRadius = Math.max(26, Math.min(56, z.radius * 1.65));
+      } else if (this.lobbyCameraMode === 'zone_b' && this.arena.zones[1]) {
+        const z = this.arena.zones[1];
+        desiredTarget.set(z.centerX, 4, z.centerZ);
+        presetRadius = Math.max(26, Math.min(56, z.radius * 1.65));
+      } else if (this.lobbyCameraMode === 'zone_c' && this.arena.zones[2]) {
+        const z = this.arena.zones[2];
+        desiredTarget.set(z.centerX, 4, z.centerZ);
+        presetRadius = Math.max(26, Math.min(56, z.radius * 1.65));
+      } else if (this.lobbyCameraMode === 'arsenal' && this.arena.arsenals[0]) {
+        const ar = this.arena.arsenals[0];
+        desiredTarget.set(ar.position.x, ar.position.y + 2.5, ar.position.z);
+        presetRadius = Math.min(34, baseRadius * 0.36);
+      }
+
+      const effRadius = presetRadius * this.lobbyZoom;
+      const horiz = Math.cos(this.lobbyPitch) * effRadius;
+      const desiredCam = new THREE.Vector3(
+        desiredTarget.x + Math.cos(this.lobbyYaw) * horiz,
+        desiredTarget.y + Math.sin(this.lobbyPitch) * effRadius,
+        desiredTarget.z + Math.sin(this.lobbyYaw) * horiz
       );
-      this.camera.lookAt(0, 3.0, 0);
+
+      this.lobbyCurrentCamPos.lerp(desiredCam, Math.min(1, dt * 5.2));
+      this.lobbyCurrentLook.lerp(desiredTarget, Math.min(1, dt * 6.0));
+      this.camera.position.copy(this.lobbyCurrentCamPos);
+      this.camera.lookAt(this.lobbyCurrentLook);
+
       if (this.camera.fov !== 62) {
         this.camera.fov = 62;
         this.camera.updateProjectionMatrix();
@@ -7321,6 +7669,7 @@ export class FpsEngine {
               weaponId: this.activeWeapon,
               health: this.player.health,
               alive: this.player.alive,
+              gunGameTier: this.player.gunGameTier,
               vehicleId: this.activeVehicle ? this.activeVehicle.id : null,
               vehicleSeat: this.activeVehicle ? this.activeVehicleSeat : null,
               turretId: this.activeMountedMg ? this.activeMountedMg.id : null,
@@ -7394,17 +7743,19 @@ export class FpsEngine {
       this.recoilOffsetPitch * 0.45;
 
     const radarBlips: RadarBlip[] = [];
+    const isFfa = this.isFfaLike();
     for (const actor of this.actors) {
       if (actor.isPlayer || !actor.alive) continue;
-      // Enemies show within 68m OR anytime UAV Recon is active OR within 110m when firing
+      // Enemies show within 82m OR anytime UAV Recon is active
       const d = this.player ? actor.position.distanceTo(this.player.position) : 0;
-      if (actor.team !== this.player?.team && this.uavActiveTimer <= 0 && d > 82) {
+      const isEnemyBlip = isFfa || actor.team !== this.player?.team;
+      if (isEnemyBlip && this.uavActiveTimer <= 0 && d > 82) {
         continue;
       }
       radarBlips.push({
         x: actor.position.x,
         z: actor.position.z,
-        team: actor.team,
+        team: isFfa ? 'red' : actor.team,
         alive: actor.alive,
       });
     }
@@ -7493,8 +7844,13 @@ export class FpsEngine {
         deaths: a.deaths,
         assists: a.assists,
         alive: a.alive,
+        gunGameTier: a.gunGameTier,
       }))
-      .sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+      .sort((a, b) =>
+        this.config.matchMode === 'gun_game'
+          ? (b.gunGameTier ?? 0) - (a.gunGameTier ?? 0) || b.kills - a.kills || a.deaths - b.deaths
+          : b.kills - a.kills || a.deaths - b.deaths
+      );
 
     const carriedStates = {} as Record<WeaponId, WeaponRuntimeState>;
     for (const wid of this.loadout) {
@@ -7578,11 +7934,29 @@ export class FpsEngine {
           )
         : 0;
 
+    const playerTier = this.player?.gunGameTier ?? 0;
+    const gunGameHud: GunGameHudState | null =
+      this.config.matchMode === 'gun_game'
+        ? {
+            tier: playerTier + 1,
+            totalTiers: GUN_GAME_LADDER.length,
+            currentWeaponId:
+              GUN_GAME_LADDER[Math.min(GUN_GAME_LADDER.length - 1, Math.max(0, playerTier))] ??
+              this.activeWeapon,
+            nextWeaponId:
+              playerTier + 1 < GUN_GAME_LADDER.length ? GUN_GAME_LADDER[playerTier + 1] : null,
+            leaderName: scoreboard[0]?.name || this.player?.name || 'Leader',
+            leaderTier: Math.min(GUN_GAME_LADDER.length, (scoreboard[0]?.gunGameTier ?? 0) + 1),
+          }
+        : null;
+
     this.onHudUpdate({
       phase: this.phase,
       playerUsername: this.player?.name || this.config.username || 'Vanguard-1',
       playerTeam: this.player?.team || this.config.playerTeam || 'blue',
       mode: this.config.mode,
+      matchMode: this.config.matchMode,
+      infantryOnly: MAPS[this.arena.mapId]?.infantryOnly ?? false,
       roomId: this.config.roomId,
       mpConnected: this.mpConnected,
       mpHumanCount: this.mpHumanCount,
@@ -7590,6 +7964,8 @@ export class FpsEngine {
       redScore: this.redScore,
       scoreLimit: this.config.scoreLimit,
       timeRemaining: this.timeRemaining,
+      gunGame: gunGameHud,
+      winnerName: this.winnerName,
       health: this.player?.health ?? 100,
       maxHealth: this.player?.maxHealth ?? 100,
       stamina: this.stamina,

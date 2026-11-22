@@ -1,10 +1,11 @@
-import { MapId, MultiplayerRoomSummary, TeamId, WeaponId } from './types';
+import { MapId, MatchMode, MultiplayerRoomSummary, TeamId, WeaponId } from './types';
 
 export interface RemoteHumanState {
   id: string;
   username: string;
   team: TeamId;
   weaponId: WeaponId;
+  gunGameTier: number;
   x: number;
   y: number;
   z: number;
@@ -39,13 +40,26 @@ export interface RoomSnapshotMsg {
   type: 'room_snapshot';
   roomId: string;
   mapId: MapId;
+  matchMode: MatchMode;
+  teamSize: number;
   scoreLimit: number;
   botFill: boolean;
   blueScore: number;
   redScore: number;
+  winnerName: string | null;
   timeRemaining: number;
   players: RemoteHumanState[];
   vehicles?: RemoteVehicleState[];
+}
+
+export interface JoinedRoomInfo {
+  playerId: string;
+  roomId: string;
+  mapId: MapId;
+  matchMode: MatchMode;
+  teamSize: 4 | 5 | 6 | 10;
+  scoreLimit: 25 | 50 | 75;
+  botFill: boolean;
 }
 
 export interface RemoteFireMsg {
@@ -138,7 +152,7 @@ export interface RemoteTrenchDigMsg {
 }
 
 export interface MultiplayerCallbacks {
-  onJoined?: (playerId: string, roomId: string) => void;
+  onJoined?: (info: JoinedRoomInfo) => void;
   onSnapshot?: (snapshot: RoomSnapshotMsg) => void;
   onRemoteFire?: (msg: RemoteFireMsg) => void;
   onRemoteDamage?: (msg: RemoteDamageMsg) => void;
@@ -169,6 +183,8 @@ export class MultiplayerClient {
     username: string;
     team: TeamId;
     mapId: MapId;
+    matchMode: MatchMode;
+    teamSize: 4 | 5 | 6 | 10;
     scoreLimit: number;
     botFill: boolean;
     weaponId: WeaponId;
@@ -204,7 +220,7 @@ export class MultiplayerClient {
           this.playerId = msg.playerId;
         } else if (msg.type === 'joined') {
           this.playerId = msg.playerId;
-          this.callbacks.onJoined?.(msg.playerId, msg.roomId);
+          this.callbacks.onJoined?.(msg as JoinedRoomInfo);
         } else if (msg.type === 'room_snapshot') {
           this.callbacks.onSnapshot?.(msg as RoomSnapshotMsg);
         } else if (msg.type === 'remote_fire') {
@@ -253,6 +269,7 @@ export class MultiplayerClient {
     vx: number;
     vz: number;
     weaponId: WeaponId;
+    gunGameTier?: number;
     health: number;
     alive: boolean;
     vehicleId: string | null;
@@ -292,9 +309,9 @@ export class MultiplayerClient {
     }
   }
 
-  public sendBotKill(team: TeamId) {
+  public sendBotKill(team: TeamId, gunGameTier?: number) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'bot_kill', team }));
+      this.ws.send(JSON.stringify({ type: 'bot_kill', team, gunGameTier }));
     }
   }
 
