@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TeamId, WeaponId } from './types';
+import { TeamId, WeaponId, ZombieVariant } from './types';
 import { WEAPONS } from './weapons';
 
 export interface CombatantRig {
@@ -8,6 +8,7 @@ export interface CombatantRig {
   headMesh: THREE.Mesh;
   leftLeg: THREE.Mesh;
   rightLeg: THREE.Mesh;
+  leftArm?: THREE.Group;
   rightArm: THREE.Group;
   muzzleWorldAnchor: THREE.Object3D;
   hitMeshes: THREE.Object3D[];
@@ -313,5 +314,208 @@ export function buildCombatantRig(
     muzzleWorldAnchor,
     hitMeshes,
     nameSprite,
+  };
+}
+
+export function buildZombieRig(zombieId: string, variant: ZombieVariant): CombatantRig {
+  const root = new THREE.Group();
+  const bodyPivot = new THREE.Group();
+  const isBrute = variant === 'brute';
+  const isRunner = variant === 'runner';
+  const scale = isBrute ? 1.38 : isRunner ? 0.94 : 1.02;
+  bodyPivot.scale.set(scale, scale, scale);
+  root.add(bodyPivot);
+
+  if (!sharedShadowTex) {
+    sharedShadowTex = createContactShadowTexture();
+  }
+
+  const contactShadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.25 * scale, 1.25 * scale),
+    new THREE.MeshBasicMaterial({
+      map: sharedShadowTex,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.85,
+    })
+  );
+  contactShadow.rotation.x = -Math.PI / 2;
+  contactShadow.position.y = 0.025;
+  root.add(contactShadow);
+
+  const skinColor = isBrute ? 0x3b4d3e : isRunner ? 0x5c3a3a : 0x556b52;
+  const ragColor = isBrute ? 0x1c2126 : isRunner ? 0x2c1618 : 0x283127;
+  const armorColor = isBrute ? 0x2a343d : 0x23292f;
+  const glowColor = isBrute ? 0x22c55e : isRunner ? 0xef4444 : 0xa3e635;
+
+  const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, metalness: 0.04, roughness: 0.86 });
+  const ragMat = new THREE.MeshStandardMaterial({ color: ragColor, metalness: 0.06, roughness: 0.92 });
+  const plateMat = new THREE.MeshStandardMaterial({ color: armorColor, metalness: 0.58, roughness: 0.42 });
+  const bloodMat = new THREE.MeshStandardMaterial({ color: 0x6b1414, metalness: 0.14, roughness: 0.38 });
+  const eyeMat = new THREE.MeshStandardMaterial({
+    color: glowColor,
+    emissive: glowColor,
+    emissiveIntensity: 1.65,
+    metalness: 0.2,
+    roughness: 0.2,
+  });
+
+  const tagHitbox = (obj: THREE.Object3D, hitbox: 'head' | 'body') => {
+    obj.userData.combatantId = zombieId;
+    obj.userData.team = 'red';
+    obj.userData.hitbox = hitbox;
+  };
+
+  const legGeo = new THREE.BoxGeometry(0.18, 0.72, 0.2);
+  legGeo.translate(0, -0.36, 0);
+
+  const leftLeg = new THREE.Mesh(legGeo, ragMat);
+  leftLeg.position.set(-0.14, 0.74, 0);
+  leftLeg.castShadow = true;
+  tagHitbox(leftLeg, 'body');
+
+  const rightLeg = new THREE.Mesh(legGeo, ragMat);
+  rightLeg.position.set(0.14, 0.74, 0);
+  rightLeg.castShadow = true;
+  tagHitbox(rightLeg, 'body');
+
+  const bootGeo = new THREE.BoxGeometry(0.2, 0.17, 0.26);
+  const leftBoot = new THREE.Mesh(bootGeo, plateMat);
+  leftBoot.position.set(0, -0.65, 0.03);
+  leftLeg.add(leftBoot);
+  tagHitbox(leftBoot, 'body');
+
+  const rightBoot = new THREE.Mesh(bootGeo, plateMat);
+  rightBoot.position.set(0, -0.65, 0.03);
+  rightLeg.add(rightBoot);
+  tagHitbox(rightBoot, 'body');
+
+  // Hunched torso
+  const torso = new THREE.Mesh(
+    new THREE.BoxGeometry(isBrute ? 0.56 : 0.44, 0.64, isBrute ? 0.34 : 0.25),
+    ragMat
+  );
+  torso.position.set(0, 1.04, 0.04);
+  torso.rotation.x = isRunner ? 0.26 : 0.15;
+  torso.castShadow = true;
+  tagHitbox(torso, 'body');
+
+  // Bio-infected core or cracked chest ribs
+  const chestDetail = new THREE.Mesh(
+    new THREE.BoxGeometry(isBrute ? 0.26 : 0.28, isBrute ? 0.24 : 0.34, isBrute ? 0.36 : 0.27),
+    isBrute ? eyeMat : bloodMat
+  );
+  chestDetail.position.set(0, 1.09, 0.06);
+  chestDetail.rotation.x = torso.rotation.x;
+  tagHitbox(chestDetail, 'body');
+
+  if (isBrute) {
+    const chestArmor = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.38, 0.38), plateMat);
+    chestArmor.position.set(0, 1.18, 0.04);
+    chestArmor.castShadow = true;
+    tagHitbox(chestArmor, 'body');
+    bodyPivot.add(chestArmor);
+
+    const pauldronGeo = new THREE.BoxGeometry(0.22, 0.22, 0.28);
+    const lPauldron = new THREE.Mesh(pauldronGeo, plateMat);
+    lPauldron.position.set(-0.36, 1.32, 0.04);
+    tagHitbox(lPauldron, 'body');
+    const rPauldron = new THREE.Mesh(pauldronGeo, plateMat);
+    rPauldron.position.set(0.36, 1.32, 0.04);
+    tagHitbox(rPauldron, 'body');
+    bodyPivot.add(lPauldron, rPauldron);
+  }
+
+  // Outstretched zombie arms with clawed hands
+  const armW = isBrute ? 0.17 : 0.12;
+  const armLen = isBrute ? 0.54 : 0.48;
+  const armGeo = new THREE.BoxGeometry(armW, armW, armLen);
+  armGeo.translate(0, 0, armLen * 0.46);
+  const clawGeo = new THREE.BoxGeometry(armW * 0.85, 0.08, 0.16);
+
+  const leftArm = new THREE.Group();
+  leftArm.position.set(isBrute ? -0.35 : -0.28, 1.24, 0.08);
+  const lArmMesh = new THREE.Mesh(armGeo, skinMat);
+  tagHitbox(lArmMesh, 'body');
+  const lClaw = new THREE.Mesh(clawGeo, bloodMat);
+  lClaw.position.set(0, -0.02, armLen * 0.94);
+  tagHitbox(lClaw, 'body');
+  leftArm.add(lArmMesh, lClaw);
+  leftArm.rotation.x = isRunner ? -0.25 : -0.1;
+
+  const rightArm = new THREE.Group();
+  rightArm.position.set(isBrute ? 0.35 : 0.28, 1.24, 0.08);
+  const rArmMesh = new THREE.Mesh(armGeo, skinMat);
+  tagHitbox(rArmMesh, 'body');
+  const rClaw = new THREE.Mesh(clawGeo, bloodMat);
+  rClaw.position.set(0, -0.02, armLen * 0.94);
+  tagHitbox(rClaw, 'body');
+  rightArm.add(rArmMesh, rClaw);
+  rightArm.rotation.x = isRunner ? -0.25 : -0.1;
+
+  // Head + Jaw + Glowing Necrotic Eyes
+  const headMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(isBrute ? 0.34 : 0.29, isBrute ? 0.34 : 0.3, isBrute ? 0.34 : 0.31),
+    isBrute ? plateMat : skinMat
+  );
+  headMesh.position.set(0, 1.5, isRunner ? 0.14 : 0.1);
+  headMesh.rotation.z = isBrute ? 0 : 0.09;
+  headMesh.castShadow = true;
+  tagHitbox(headMesh, 'head');
+
+  const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.09, 0.24), bloodMat);
+  jaw.position.set(0, 1.38, (isRunner ? 0.14 : 0.1) + 0.05);
+  tagHitbox(jaw, 'head');
+
+  const leftEye = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.045, 0.05), eyeMat);
+  leftEye.position.set(-0.075, 1.53, (isRunner ? 0.14 : 0.1) + 0.15);
+  tagHitbox(leftEye, 'head');
+
+  const rightEye = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.045, 0.05), eyeMat);
+  rightEye.position.set(0.075, 1.53, (isRunner ? 0.14 : 0.1) + 0.15);
+  tagHitbox(rightEye, 'head');
+
+  const muzzleWorldAnchor = new THREE.Object3D();
+  muzzleWorldAnchor.position.set(0, 0, armLen);
+  rightArm.add(muzzleWorldAnchor);
+
+  bodyPivot.add(
+    leftLeg,
+    rightLeg,
+    torso,
+    chestDetail,
+    leftArm,
+    rightArm,
+    headMesh,
+    jaw,
+    leftEye,
+    rightEye
+  );
+
+  const hitMeshes: THREE.Object3D[] = [
+    headMesh,
+    jaw,
+    leftEye,
+    rightEye,
+    torso,
+    chestDetail,
+    leftLeg,
+    rightLeg,
+    lArmMesh,
+    rArmMesh,
+    lClaw,
+    rClaw,
+  ];
+
+  return {
+    root,
+    bodyPivot,
+    headMesh,
+    leftLeg,
+    rightLeg,
+    leftArm,
+    rightArm,
+    muzzleWorldAnchor,
+    hitMeshes,
   };
 }

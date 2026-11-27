@@ -47,6 +47,7 @@ export interface RoomSnapshotMsg {
   blueScore: number;
   redScore: number;
   winnerName: string | null;
+  zombieWave?: number;
   timeRemaining: number;
   players: RemoteHumanState[];
   vehicles?: RemoteVehicleState[];
@@ -270,6 +271,7 @@ export class MultiplayerClient {
     vz: number;
     weaponId: WeaponId;
     gunGameTier?: number;
+    zombieWave?: number;
     health: number;
     alive: boolean;
     vehicleId: string | null;
@@ -309,9 +311,9 @@ export class MultiplayerClient {
     }
   }
 
-  public sendBotKill(team: TeamId, gunGameTier?: number) {
+  public sendBotKill(team: TeamId, gunGameTier?: number, zombieWave?: number) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'bot_kill', team, gunGameTier }));
+      this.ws.send(JSON.stringify({ type: 'bot_kill', team, gunGameTier, zombieWave }));
     }
   }
 

@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Award,
+  Biohazard,
   Code2,
   Compass,
   Crosshair,
   Eye,
+  Flame,
   Globe,
   Info,
+  Layers,
   MapPin,
   Play,
   RefreshCw,
@@ -14,10 +17,12 @@ import {
   Search,
   Shield,
   SlidersHorizontal,
+  Smartphone,
   UserCheck,
   Users,
   Volume2,
   VolumeX,
+  Wrench,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -42,6 +47,7 @@ import { ScoreboardModal } from './ScoreboardModal';
 import { WeaponArtwork } from './WeaponArtwork';
 
 type LobbyCameraPreset = 'orbit' | 'overview' | 'zone_a' | 'zone_b' | 'zone_c' | 'arsenal';
+type LobbyTabId = 'command' | 'arenas' | 'armory' | 'rooms' | 'about';
 
 interface GameMenusProps {
   hud: HudSnapshot;
@@ -53,6 +59,8 @@ interface GameMenusProps {
   onLobbyZoom: (delta: number) => void;
   onLobbyPreset: (preset: LobbyCameraPreset) => void;
   onOpenAccount: () => void;
+  onOpenAndroidApp: () => void;
+  isAppInstalled?: boolean;
   onUpdateConfig: (next: Partial<MatchConfig>) => void;
   onStartMatch: () => void;
   onResumeMatch: () => void;
@@ -62,11 +70,12 @@ interface GameMenusProps {
 const SLOT_CONFIGS: Array<{
   idx: 0 | 1 | 2;
   label: string;
+  shortLabel: string;
   configKey: 'startingWeapon' | 'startingSecondary' | 'startingHeavy';
 }> = [
-  { idx: 0, label: 'Slot [1] Primary', configKey: 'startingWeapon' },
-  { idx: 1, label: 'Slot [2] Secondary', configKey: 'startingSecondary' },
-  { idx: 2, label: 'Slot [3] Heavy', configKey: 'startingHeavy' },
+  { idx: 0, label: 'Slot [1] Primary', shortLabel: 'Primary', configKey: 'startingWeapon' },
+  { idx: 1, label: 'Slot [2] Secondary', shortLabel: 'Secondary', configKey: 'startingSecondary' },
+  { idx: 2, label: 'Slot [3] Heavy', shortLabel: 'Heavy', configKey: 'startingHeavy' },
 ];
 
 const MODE_CARDS: Array<{ id: MatchMode; title: string; badge: string; desc: string }> = [
@@ -88,11 +97,18 @@ const MODE_CARDS: Array<{ id: MatchMode; title: string; badge: string; desc: str
     badge: '18 TIERS',
     desc: 'Each elimination upgrades your weapon ladder tier',
   },
+  {
+    id: 'zombies',
+    title: 'Zombie Survival',
+    badge: 'CO-OP HORDE',
+    desc: 'Hold out against endless waves of Walkers, Runners & Brutes',
+  },
 ];
 
 function formatMatchModeLabel(mode?: MatchMode): string {
   if (mode === 'ffa') return 'Free-For-All';
   if (mode === 'gun_game') return 'Gun Game';
+  if (mode === 'zombies') return 'Zombie Survival';
   return 'TDM';
 }
 
@@ -106,12 +122,15 @@ export const GameMenus: React.FC<GameMenusProps> = ({
   onLobbyZoom,
   onLobbyPreset,
   onOpenAccount,
+  onOpenAndroidApp,
+  isAppInstalled,
   onUpdateConfig,
   onStartMatch,
   onResumeMatch,
   onReturnToLobby,
 }) => {
-  const [lobbyTab, setLobbyTab] = useState<'play' | 'rooms' | 'about'>('play');
+  const [lobbyTab, setLobbyTab] = useState<LobbyTabId>('command');
+  const [armoryView, setArmoryView] = useState<'loadout' | 'ladder'>('loadout');
   const [mapFilter, setMapFilter] = useState<'all' | 'infantry' | 'combined'>('all');
   const [cameraPreset, setCameraPreset] = useState<LobbyCameraPreset>('orbit');
   const [editingSlot, setEditingSlot] = useState<0 | 1 | 2>(0);
@@ -190,6 +209,18 @@ export const GameMenus: React.FC<GameMenusProps> = ({
     onLobbyPreset(preset);
   };
 
+  const handleSelectMatchMode = (mode: MatchMode) => {
+    onUpdateConfig({
+      matchMode: mode,
+      playerTeam: mode === 'zombies' ? 'blue' : config.playerTeam,
+    });
+    if (mode === 'gun_game') {
+      setArmoryView('ladder');
+    } else if (armoryView === 'ladder') {
+      setArmoryView('loadout');
+    }
+  };
+
   const handleBackdropPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
     dragPointerRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -260,9 +291,9 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                 [
                   { id: 'orbit', label: 'Auto Orbit' },
                   { id: 'overview', label: 'Overview' },
-                  { id: 'zone_a', label: `Zone A` },
-                  { id: 'zone_b', label: `Zone B` },
-                  { id: 'zone_c', label: `Zone C` },
+                  { id: 'zone_a', label: 'Zone A' },
+                  { id: 'zone_b', label: 'Zone B' },
+                  { id: 'zone_c', label: 'Zone C' },
                   { id: 'arsenal', label: 'Arsenal' },
                 ] as const
               ).map((p) => (
@@ -319,547 +350,598 @@ export const GameMenus: React.FC<GameMenusProps> = ({
       );
     }
 
+    const navTabs: Array<{ id: LobbyTabId; label: string; icon: React.ReactNode }> = [
+      { id: 'command', label: 'Command', icon: <Crosshair className="w-3.5 h-3.5" /> },
+      { id: 'arenas', label: `Arenas (${MAP_ORDER.length})`, icon: <MapPin className="w-3.5 h-3.5" /> },
+      { id: 'armory', label: `Armory (${WEAPON_ORDER.length})`, icon: <Wrench className="w-3.5 h-3.5" /> },
+      { id: 'rooms', label: 'Multiplayer', icon: <Globe className="w-3.5 h-3.5" /> },
+      { id: 'about', label: 'About', icon: <Info className="w-3.5 h-3.5" /> },
+    ];
+
     return (
       <div
-        className="fixed inset-0 z-20 flex items-start justify-center p-2.5 sm:p-5 bg-[#070a10]/55 overflow-y-auto touch-pan-y"
+        className="fixed inset-0 z-20 flex items-start justify-center p-2.5 sm:p-5 bg-[#070a10]/48 overflow-y-auto touch-pan-y"
         onPointerDown={handleBackdropPointerDown}
         onPointerMove={handleBackdropPointerMove}
         onPointerUp={handleBackdropPointerUp}
         onPointerCancel={handleBackdropPointerUp}
         onWheel={handleBackdropWheel}
       >
-        <div className="my-auto w-full max-w-6xl rounded-xl bg-[#0d121c]/94 border border-slate-700/80 p-3.5 sm:p-6 shadow-2xl">
-          {/* Header Row */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-800">
-            <div>
-              <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-white">
-                Vanguard Arena
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                7 Arenas (4 Combined Arms · 3 5v5 Infantry) · 50 Weapons · TDM, Free-For-All &amp; Gun Game
-              </p>
+        <div className="my-auto w-full max-w-6xl rounded-xl bg-[#0d121c]/94 border border-slate-700/85 shadow-2xl overflow-hidden">
+          {/* Clean 3-Zone Top Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-3.5 bg-[#090d15] border-b border-slate-800/90">
+            <div className="flex items-center gap-3">
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <h1 className="font-display text-xl sm:text-2xl font-bold tracking-tight text-white">
+                    Vanguard Arena
+                  </h1>
+                  <span className="hidden md:inline font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#141c2b] border border-slate-700 text-amber-300 whitespace-nowrap">
+                    {formatMatchModeLabel(config.matchMode).toUpperCase()}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Drag outside panel to orbit 3D arena · {activeMap.name} ({activeMap.sizeLabel})
+                </p>
+              </div>
             </div>
 
+            {/* Center Nav Tabs */}
+            <nav className="flex flex-wrap items-center rounded-lg bg-[#121824] border border-slate-800 p-1 gap-0.5">
+              {navTabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setLobbyTab(t.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                    lobbyTab === t.id
+                      ? 'bg-amber-500 text-slate-950 font-semibold'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+                  }`}
+                >
+                  {t.icon}
+                  {t.label}
+                </button>
+              ))}
+            </nav>
+
+            {/* Right Utility Controls & Primary CTA */}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={onOpenAccount}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#121824] hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#121824] hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <UserCheck className="w-3.5 h-3.5 text-amber-400" />
-                <span className="font-semibold text-white">{config.username}</span>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                <span className="font-semibold text-white max-w-[96px] truncate">{config.username}</span>
+                <span className="text-[10px] font-mono px-1 rounded bg-slate-800 text-slate-400">
                   {account && !account.isGuest ? 'Account' : 'Guest'}
                 </span>
               </button>
 
               <button
                 type="button"
-                onClick={onToggleInspect3D}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#121824] hover:bg-slate-800 border border-cyan-500/45 text-cyan-300 text-xs font-semibold transition-colors cursor-pointer"
+                onClick={onOpenAndroidApp}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#121824] hover:bg-slate-800 border border-emerald-500/45 text-emerald-300 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                title="Install on Android or Download Android Studio APK Project"
               >
-                <Eye className="w-3.5 h-3.5" />
-                Inspect 3D Map
+                <Smartphone className="w-3.5 h-3.5" />
+                {isAppInstalled ? 'Android Installed' : 'Android App'}
               </button>
 
-              <div className="flex items-center rounded-lg bg-[#121824] border border-slate-800 p-1">
-                <button
-                  type="button"
-                  onClick={() => setLobbyTab('play')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                    lobbyTab === 'play'
-                      ? 'bg-slate-800 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Crosshair className="w-3.5 h-3.5" />
-                  Loadout &amp; Maps
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLobbyTab('rooms')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                    lobbyTab === 'rooms'
-                      ? 'bg-slate-800 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Globe className="w-3.5 h-3.5" />
-                  Multiplayer
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLobbyTab('about')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                    lobbyTab === 'about'
-                      ? 'bg-slate-800 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Info className="w-3.5 h-3.5" />
-                  About
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={onToggleInspect3D}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#121824] hover:bg-slate-800 border border-cyan-500/45 text-cyan-300 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Inspect 3D
+              </button>
 
               <button
                 type="button"
                 onClick={() => onUpdateConfig({ muted: !config.muted })}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors shrink-0 cursor-pointer"
+                aria-label={config.muted ? 'Unmute Audio' : 'Mute Audio'}
+                title={config.muted ? 'Muted (Click to Unmute)' : 'Audio On'}
               >
-                {config.muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                {config.muted ? 'Muted' : 'Audio'}
+                {config.muted ? <VolumeX className="w-4 h-4 text-slate-400" /> : <Volume2 className="w-4 h-4" />}
               </button>
 
               <button
                 type="button"
                 onClick={onStartMatch}
-                className="flex items-center gap-2 px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition-colors whitespace-nowrap shrink-0 shadow-lg cursor-pointer"
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs sm:text-sm transition-colors whitespace-nowrap shrink-0 shadow-lg cursor-pointer"
               >
-                <Play className="w-4 h-4 fill-current" />
-                {config.mode === 'multiplayer' ? 'Join Match' : 'Deploy to Match'}
+                <Play className="w-3.5 h-3.5 fill-current" />
+                {config.mode === 'multiplayer' ? 'Join Match' : 'Deploy'}
               </button>
             </div>
           </div>
 
-          {lobbyTab === 'about' ? (
-            <div className="space-y-5 py-2">
-              <div className="rounded-lg bg-[#121824] border border-slate-800 p-5">
-                <div className="flex items-center gap-2 text-amber-400 text-xs font-mono uppercase tracking-wider mb-2">
-                  <Code2 className="w-4 h-4" />
-                  Development Team
-                </div>
-                <h2 className="font-display text-xl font-bold text-white mb-1">
-                  Created by VictorTheGreat &amp; Williamson22
-                </h2>
-                <p className="text-sm text-slate-400 leading-relaxed">
-                  Vanguard Arena is developed by <span className="text-slate-100 font-semibold">VictorTheGreat</span> and{' '}
-                  <span className="text-slate-100 font-semibold">Williamson22</span> as a browser-based
-                  3D tactical shooter featuring Team Deathmatch, Free-For-All, Gun Game, 5v5 infantry CQB maps, combined-arms battlefields, 50 firearms, and real-time WebSocket multiplayer.
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                  <div className="rounded-lg bg-[#0d121c] border border-slate-800 p-4">
-                    <div className="font-display text-base font-bold text-white">VictorTheGreat</div>
-                    <div className="text-xs text-amber-400 mt-0.5">Developer</div>
-                  </div>
-                  <div className="rounded-lg bg-[#0d121c] border border-slate-800 p-4">
-                    <div className="font-display text-base font-bold text-white">Williamson22</div>
-                    <div className="text-xs text-amber-400 mt-0.5">Developer</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded-lg bg-[#121824] border border-slate-800 p-5">
-                  <h3 className="font-display text-sm font-semibold text-slate-100 mb-2">
-                    5v5 Infantry Maps &amp; Combined Arms
-                  </h3>
-                  <ul className="text-xs text-slate-400 space-y-1.5 leading-relaxed">
-                    <li>3 tight 5v5 Infantry Arenas (Cargo Killhouse, Subway Concourse, Skyline Helideck) with zero vehicles or mounted turrets</li>
-                    <li>4 large Combined-Arms Arenas (Industrial Yard, Desert Outpost, Cryo Bunker, Pacific Archipelago) with Tanks, APCs, AH-64 Apaches &amp; Mini Hangars</li>
-                    <li>Game Modes: Team Deathmatch, Free-For-All, and 18-Tier Gun Game Escalation</li>
-                    <li>50 detailed weapons with illustrated profiles, optical red-dot crossbars, and Arsenal armory stations</li>
-                  </ul>
-                </div>
-
-                <div className="rounded-lg bg-[#121824] border border-slate-800 p-5 flex flex-col justify-between gap-4">
-                  <div>
-                    <h3 className="font-display text-sm font-semibold text-slate-100 mb-2">
-                      Online Multiplayer &amp; Interactive 3D Map Preview
-                    </h3>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Switch maps to inspect live 3D geometry behind the lobby, click Inspect 3D Map to orbit freely or jump directly to Zones A, B, C, and the base Arsenal, or launch a live multiplayer room with friends.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setLobbyTab('play')}
-                      className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
-                    >
-                      Configure Loadout
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onStartMatch}
-                      className="flex items-center gap-2 px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs transition-colors cursor-pointer"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      Deploy to Match
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : lobbyTab === 'rooms' ? (
-            <div className="space-y-4 py-1">
-              {/* Quick Mode / Map Launchers */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                {[
-                  { label: '5v5 Killhouse TDM', mapId: 'killhouse' as MapId, matchMode: 'tdm' as MatchMode, teamSize: 5 as const, roomId: 'cqb-5v5' },
-                  { label: '5v5 Metro FFA', mapId: 'metro' as MapId, matchMode: 'ffa' as MatchMode, teamSize: 5 as const, roomId: 'metro-ffa' },
-                  { label: 'Rooftop Gun Game', mapId: 'rooftop' as MapId, matchMode: 'gun_game' as MatchMode, teamSize: 5 as const, roomId: 'gungame-1' },
-                  { label: 'Pacific Combined Arms', mapId: 'island' as MapId, matchMode: 'tdm' as MatchMode, teamSize: 10 as const, roomId: 'pacific-hq' },
-                ].map((preset) => (
-                  <button
-                    key={preset.roomId}
-                    type="button"
-                    onClick={() =>
-                      onUpdateConfig({
-                        mode: 'multiplayer',
-                        mapId: preset.mapId,
-                        matchMode: preset.matchMode,
-                        teamSize: preset.teamSize,
-                        roomId: preset.roomId,
-                        botFill: true,
-                      })
-                    }
-                    className={`text-left p-2.5 rounded-lg border transition-colors cursor-pointer ${
-                      config.mode === 'multiplayer' && config.roomId === preset.roomId
-                        ? 'bg-sky-500/15 border-sky-400 text-white'
-                        : 'bg-[#121824] border-slate-800 hover:border-slate-600 text-slate-200'
-                    }`}
-                  >
-                    <div className="text-xs font-display font-bold">{preset.label}</div>
-                    <div className="text-[10px] font-mono text-slate-400 mt-0.5">
-                      {MAPS[preset.mapId].sizeLabel} · Room: {preset.roomId}
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                {/* Room Config */}
-                <div className="lg:col-span-5 rounded-lg bg-[#121824] border border-slate-800 p-4 space-y-3.5">
-                  <div className="flex items-center justify-between">
-                    <h2 className="font-display text-base font-semibold text-white flex items-center gap-2">
-                      <Globe className="w-4 h-4 text-sky-400" />
-                      Host or Join Room
-                    </h2>
-                    <span className="text-[11px] font-mono text-emerald-400">Live WebSocket</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">Room Code</label>
-                      <input
-                        type="text"
-                        maxLength={20}
-                        value={config.roomId}
-                        onChange={(e) =>
-                          onUpdateConfig({
-                            mode: 'multiplayer',
-                            roomId: e.target.value.replace(/[^a-zA-Z0-9_-]/g, '') || 'alpha-1',
-                          })
-                        }
-                        placeholder="alpha-1"
-                        className="w-full px-3 py-1.5 rounded-md bg-[#0d121c] border border-slate-700 focus:border-sky-400 focus:outline-none text-xs font-mono text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">Arena Map</label>
-                      <select
-                        value={config.mapId}
-                        onChange={(e) => selectMap(e.target.value as MapId)}
-                        className="w-full px-2.5 py-1.5 rounded-md bg-[#0d121c] border border-slate-700 focus:border-sky-400 focus:outline-none text-xs text-white"
+          {/* Tab Body */}
+          <div className="p-4 sm:p-5">
+            {lobbyTab === 'command' && (
+              <div className="space-y-4">
+                {/* Combat Mode Cards (4-Up) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                  {MODE_CARDS.map((mc) => {
+                    const active = config.matchMode === mc.id;
+                    const isZombieCard = mc.id === 'zombies';
+                    return (
+                      <button
+                        key={mc.id}
+                        type="button"
+                        onClick={() => handleSelectMatchMode(mc.id)}
+                        className={`text-left p-3 rounded-lg border transition-colors cursor-pointer ${
+                          active
+                            ? isZombieCard
+                              ? 'bg-lime-500/15 border-lime-400 text-white'
+                              : 'bg-amber-500/15 border-amber-400 text-white'
+                            : 'bg-[#121824] border-slate-800 hover:border-slate-600 text-slate-300'
+                        }`}
                       >
-                        {MAP_ORDER.map((mid) => (
-                          <option key={mid} value={mid}>
-                            {MAPS[mid].name} {MAPS[mid].infantryOnly ? '(5v5 Infantry)' : '(Combined Arms)'}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] text-slate-400 mb-1.5">Game Mode</label>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {MODE_CARDS.map((mc) => (
-                        <button
-                          key={mc.id}
-                          type="button"
-                          onClick={() => onUpdateConfig({ matchMode: mc.id, mode: 'multiplayer' })}
-                          className={`py-1.5 px-2 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer ${
-                            config.matchMode === mc.id
-                              ? 'bg-amber-500 border-amber-400 text-slate-950'
-                              : 'bg-[#0d121c] border-slate-800 text-slate-300 hover:border-slate-600'
-                          }`}
-                        >
-                          {formatMatchModeLabel(mc.id)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {config.matchMode === 'tdm' && (
-                    <div>
-                      <label className="block text-[11px] text-slate-400 mb-1.5">Your Faction</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {(['blue', 'red'] as TeamId[]).map((tid) => (
-                          <button
-                            key={tid}
-                            type="button"
-                            onClick={() => onUpdateConfig({ playerTeam: tid, mode: 'multiplayer' })}
-                            className={`py-1.5 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
-                              config.playerTeam === tid
-                                ? tid === 'blue'
-                                  ? 'bg-blue-600 border-blue-400 text-white'
-                                  : 'bg-red-600 border-red-400 text-white'
-                                : 'bg-[#0d121c] border-slate-800 text-slate-300 hover:border-slate-600'
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-display text-sm font-bold text-white flex items-center gap-1.5">
+                            {isZombieCard ? (
+                              <Biohazard className={`w-4 h-4 shrink-0 ${active ? 'text-lime-400' : 'text-slate-500'}`} />
+                            ) : (
+                              <Award className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-amber-400' : 'text-slate-500'}`} />
+                            )}
+                            {mc.title}
+                          </span>
+                          <span
+                            className={`font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#0a0f18] border whitespace-nowrap shrink-0 ${
+                              isZombieCard
+                                ? 'border-lime-500/40 text-lime-300'
+                                : 'border-slate-700 text-amber-300'
                             }`}
                           >
-                            {tid === 'blue' ? 'Vanguard (Blue)' : 'Syndicate (Red)'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onUpdateConfig({ botFill: true, mode: 'multiplayer' })}
-                      className={`py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
-                        config.botFill
-                          ? 'bg-sky-600 border-sky-400 text-white'
-                          : 'bg-[#0d121c] border-slate-800 text-slate-300'
-                      }`}
-                    >
-                      Bots + Humans ({config.teamSize}v{config.teamSize})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onUpdateConfig({ botFill: false, mode: 'multiplayer' })}
-                      className={`py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
-                        !config.botFill
-                          ? 'bg-sky-600 border-sky-400 text-white'
-                          : 'bg-[#0d121c] border-slate-800 text-slate-300'
-                      }`}
-                    >
-                      Humans Only
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (config.mode !== 'multiplayer') {
-                        onUpdateConfig({ mode: 'multiplayer' });
-                      }
-                      onStartMatch();
-                    }}
-                    className="w-full flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm transition-colors cursor-pointer"
-                  >
-                    <Play className="w-4 h-4 fill-current" />
-                    Connect &amp; Join &ldquo;{config.roomId}&rdquo;
-                  </button>
-                </div>
-
-                {/* Active Rooms List */}
-                <div className="lg:col-span-7 rounded-lg bg-[#121824] border border-slate-800 p-4 flex flex-col">
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="font-display text-base font-semibold text-white flex items-center gap-2">
-                      <Users className="w-4 h-4 text-amber-400" />
-                      Active Multiplayer Rooms ({rooms.length})
-                    </h2>
-                    <button
-                      type="button"
-                      onClick={() => void refreshRooms()}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 cursor-pointer"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${loadingRooms ? 'animate-spin' : ''}`} />
-                      Refresh
-                    </button>
-                  </div>
-
-                  {rooms.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center py-10 text-center border border-dashed border-slate-800 rounded-lg">
-                      <Globe className="w-8 h-8 text-slate-600 mb-2" />
-                      <div className="text-sm font-medium text-slate-300">No active human rooms yet</div>
-                      <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                        Select a quick preset above or enter a room code like <span className="font-mono text-slate-300">cqb-5v5</span> and click Connect. Other players see your room live here!
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-72 overflow-y-auto">
-                      {rooms.map((rm) => (
-                        <div
-                          key={rm.roomId}
-                          className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-[#0d121c] border border-slate-800 hover:border-sky-500/60"
-                        >
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-mono font-bold text-sm text-white">{rm.roomId}</span>
-                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 font-medium">
-                                {MAPS[rm.mapId]?.name || rm.mapId}
-                              </span>
-                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-sky-300 font-mono">
-                                {formatMatchModeLabel(rm.matchMode)} · {rm.teamSize || 5}v{rm.teamSize || 5}
-                              </span>
-                              <span className="text-[11px] font-mono text-slate-400">
-                                {rm.botFill ? 'Bots + Humans' : 'Humans Only'}
-                              </span>
-                            </div>
-                            <div className="text-xs text-slate-400 mt-1 font-mono">
-                              {rm.matchMode === 'tdm'
-                                ? `Score: ${rm.blueScore} - ${rm.redScore} / ${rm.scoreLimit}`
-                                : `Target: ${rm.matchMode === 'gun_game' ? '18 Tiers' : `${rm.scoreLimit} Kills`}`}{' '}
-                              · {rm.humanCount}/{rm.maxHumans} Players
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              onUpdateConfig({
-                                mode: 'multiplayer',
-                                roomId: rm.roomId,
-                                mapId: rm.mapId,
-                                matchMode: rm.matchMode || 'tdm',
-                                teamSize: ([4, 5, 6, 10].includes(rm.teamSize)
-                                  ? rm.teamSize
-                                  : 5) as 4 | 5 | 6 | 10,
-                                scoreLimit: rm.scoreLimit,
-                                botFill: rm.botFill,
-                              });
-                              onStartMatch();
-                            }}
-                            className="px-4 py-1.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold cursor-pointer"
-                          >
-                            Join Room
-                          </button>
+                            {mc.badge}
+                          </span>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Interactive Quick Bar: Solo vs MP + Game Mode + Team/Status */}
-              <div className="mb-4 rounded-lg bg-[#121824] border border-slate-800 p-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-medium text-slate-400">Session:</span>
-                  <button
-                    type="button"
-                    onClick={() => onUpdateConfig({ mode: 'solo' })}
-                    className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
-                      config.mode === 'solo'
-                        ? 'bg-amber-500 border-amber-400 text-slate-950'
-                        : 'bg-[#0d121c] border-slate-700 text-slate-300'
-                    }`}
-                  >
-                    Solo vs AI
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onUpdateConfig({ mode: 'multiplayer' })}
-                    className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
-                      config.mode === 'multiplayer'
-                        ? 'bg-sky-500 border-sky-400 text-slate-950'
-                        : 'bg-[#0d121c] border-slate-700 text-slate-300'
-                    }`}
-                  >
-                    Online Multiplayer
-                  </button>
-
-                  {config.mode === 'multiplayer' && (
-                    <div className="flex items-center gap-2 ml-1">
-                      <input
-                        type="text"
-                        maxLength={20}
-                        value={config.roomId}
-                        onChange={(e) =>
-                          onUpdateConfig({
-                            roomId: e.target.value.replace(/[^a-zA-Z0-9_-]/g, '') || 'alpha-1',
-                          })
-                        }
-                        placeholder="Room ID"
-                        className="w-28 px-2.5 py-1 rounded bg-[#0d121c] border border-slate-700 text-xs font-mono text-white"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => onUpdateConfig({ botFill: !config.botFill })}
-                        className={`px-2.5 py-1 rounded text-[11px] font-mono border cursor-pointer ${
-                          config.botFill
-                            ? 'bg-slate-800 border-emerald-500/50 text-emerald-300'
-                            : 'bg-slate-800 border-slate-700 text-slate-400'
-                        }`}
-                      >
-                        {config.botFill ? 'Bots: ON' : 'Humans Only'}
+                        <p className="text-[11px] text-slate-400 mt-1 leading-snug">{mc.desc}</p>
                       </button>
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
 
-                {config.matchMode === 'tdm' ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">Team:</span>
-                    {(['blue', 'red'] as TeamId[]).map((tid) => (
-                      <button
-                        key={tid}
-                        type="button"
-                        onClick={() => onUpdateConfig({ playerTeam: tid })}
-                        className={`px-3 py-1 rounded text-xs font-semibold border cursor-pointer ${
-                          config.playerTeam === tid
-                            ? tid === 'blue'
-                              ? 'bg-blue-600 border-blue-400 text-white'
-                              : 'bg-red-600 border-red-400 text-white'
-                            : 'bg-[#0d121c] border-slate-700 text-slate-300'
-                        }`}
-                      >
-                        {tid === 'blue' ? 'Vanguard (Blue)' : 'Syndicate (Red)'}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-xs font-mono text-amber-300">
-                    {config.matchMode === 'gun_game'
-                      ? 'Gun Game · Every elimination advances your weapon tier'
-                      : 'Free-For-All · Every operator on radar is hostile'}
-                  </div>
-                )}
-              </div>
+                {/* Main Launchpad Split */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                  {/* Left 7 Cols: Active Arena Spotlight + Equipped Loadout Preview */}
+                  <div className="lg:col-span-7 space-y-4">
+                    {/* Active Arena Spotlight */}
+                    <div className="rounded-lg bg-[#121824] border border-slate-800 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400">
+                              Active Arena
+                            </span>
+                            <span
+                              className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                                activeMap.infantryOnly
+                                  ? 'bg-cyan-500/15 border border-cyan-500/40 text-cyan-300'
+                                  : 'bg-slate-900 border border-slate-700 text-slate-300'
+                              }`}
+                            >
+                              {activeMap.infantryOnly ? '5v5 INFANTRY CQB' : 'COMBINED ARMS'}
+                            </span>
+                          </div>
+                          <h2 className="font-display text-lg font-bold text-white mt-0.5">
+                            {activeMap.name}{' '}
+                            <span className="font-mono text-xs font-normal text-slate-400">
+                              {activeMap.sizeLabel} · {activeMap.environment}
+                            </span>
+                          </h2>
+                        </div>
 
-              {/* Game Mode Selector */}
-              <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {MODE_CARDS.map((mc) => {
-                  const active = config.matchMode === mc.id;
-                  return (
-                    <button
-                      key={mc.id}
-                      type="button"
-                      onClick={() => onUpdateConfig({ matchMode: mc.id })}
-                      className={`text-left p-3 rounded-lg border transition-colors cursor-pointer ${
-                        active
-                          ? 'bg-amber-500/15 border-amber-400 text-white'
-                          : 'bg-[#121824] border-slate-800 hover:border-slate-600 text-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-display text-sm font-bold text-white flex items-center gap-1.5">
-                          <Award className={`w-3.5 h-3.5 ${active ? 'text-amber-400' : 'text-slate-500'}`} />
-                          {mc.title}
-                        </span>
-                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#0a0f18] border border-slate-700 text-amber-300">
-                          {mc.badge}
+                        <button
+                          type="button"
+                          onClick={() => setLobbyTab('arenas')}
+                          className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-semibold text-white whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          Change Arena (7)
+                        </button>
+                      </div>
+
+                      <p className="text-xs text-slate-400 leading-relaxed mb-3">{activeMap.description}</p>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-800/80">
+                        <div className="flex flex-wrap gap-1.5">
+                          {activeMap.zones.map((zn, idx) => (
+                            <span
+                              key={zn}
+                              className="px-2 py-0.5 rounded bg-[#0a0f18] border border-slate-700/80 text-[10px] font-mono text-slate-300"
+                            >
+                              {['A', 'B', 'C'][idx]}: {zn}
+                            </span>
+                          ))}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1">
+                          {(
+                            [
+                              { id: 'orbit', label: 'Orbit' },
+                              { id: 'zone_a', label: 'Zone A' },
+                              { id: 'zone_b', label: 'Zone B' },
+                              { id: 'arsenal', label: 'Arsenal' },
+                            ] as const
+                          ).map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => handleSelectPreset(p.id)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-mono border cursor-pointer ${
+                                cameraPreset === p.id
+                                  ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
+                                  : 'bg-[#0a0f18] border-slate-800 text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Equipped Loadout Preview (or Gun Game Ladder Summary) */}
+                    <div className="rounded-lg bg-[#121824] border border-slate-800 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <div>
+                          <h2 className="font-display text-base font-bold text-white flex items-center gap-2">
+                            {config.matchMode === 'gun_game' ? (
+                              <>
+                                <Layers className="w-4 h-4 text-amber-400" />
+                                Gun Game 18-Tier Escalation Ladder
+                              </>
+                            ) : (
+                              <>
+                                <Wrench className="w-4 h-4 text-cyan-400" />
+                                Equipped 3-Slot Combat Loadout
+                              </>
+                            )}
+                          </h2>
+                          <p className="text-[11px] text-slate-400">
+                            {config.matchMode === 'gun_game'
+                              ? 'Every elimination automatically upgrades you through 18 firearms'
+                              : config.matchMode === 'zombies'
+                              ? 'Carry high-capacity weapons or resupply ammo at base Arsenal [E] between waves'
+                              : 'Click any slot to customize from 50 weapons · Swappable in-match at Arsenal [E]'}
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setArmoryView(config.matchMode === 'gun_game' ? 'ladder' : 'loadout');
+                            setLobbyTab('armory');
+                          }}
+                          className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-semibold text-cyan-300 whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          {config.matchMode === 'gun_game' ? 'View 18 Tiers' : 'Edit in Armory (50)'}
+                        </button>
+                      </div>
+
+                      {config.matchMode === 'gun_game' ? (
+                        <div className="grid grid-cols-3 gap-2.5">
+                          {[0, 8, 17].map((tierIdx) => {
+                            const w = WEAPONS[GUN_GAME_LADDER[tierIdx]];
+                            return (
+                              <div
+                                key={tierIdx}
+                                className="rounded-lg bg-[#0d121c] border border-slate-800 p-2.5"
+                              >
+                                <div className="text-[10px] font-mono font-bold text-amber-400">
+                                  Tier {tierIdx + 1} {tierIdx === 0 ? '· Start' : tierIdx === 17 ? '· Final' : '· Mid'}
+                                </div>
+                                <div className="font-display text-xs font-bold text-white truncate mt-0.5">
+                                  {w.name}
+                                </div>
+                                <div className="my-1.5 rounded bg-[#080c14] border border-slate-800/80 px-1.5 py-1">
+                                  <WeaponArtwork weapon={w} className="w-full h-10" />
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate">
+                                  {w.caliber} · {w.fireMode}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          {SLOT_CONFIGS.map((slot) => {
+                            const wid = carriedIds[slot.idx];
+                            const w = WEAPONS[wid];
+                            return (
+                              <button
+                                key={slot.idx}
+                                type="button"
+                                onClick={() => {
+                                  setEditingSlot(slot.idx);
+                                  setArmoryView('loadout');
+                                  setLobbyTab('armory');
+                                }}
+                                className="text-left p-2.5 rounded-lg bg-[#0d121c] border border-slate-800 hover:border-cyan-400/70 transition-colors cursor-pointer"
+                              >
+                                <div className="flex items-center justify-between text-[10px] font-mono">
+                                  <span className="font-bold text-amber-400">{slot.label}</span>
+                                  <span className="text-slate-400">{w.magSize}/{w.reserveMax}</span>
+                                </div>
+                                <div className="font-display text-xs font-bold text-white truncate mt-0.5">
+                                  {w.name}
+                                </div>
+                                <div className="my-1.5 rounded bg-[#080c14] border border-slate-800/80 px-1.5 py-1">
+                                  <WeaponArtwork weapon={w} className="w-full h-11" />
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate">
+                                  {w.caliber} · {w.rpm} RPM
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right 5 Cols: Session, Mode Parameters & Deploy */}
+                  <div className="lg:col-span-5 rounded-lg bg-[#121824] border border-slate-800 p-4 flex flex-col justify-between gap-3.5">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h2 className="font-display text-base font-semibold text-white flex items-center gap-2">
+                          <SlidersHorizontal className="w-4 h-4 text-amber-400" />
+                          Deployment Setup
+                        </h2>
+                        <span className="font-mono text-[11px] text-slate-400">
+                          {formatMatchModeLabel(config.matchMode)}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-1">{mc.desc}</p>
-                    </button>
-                  );
-                })}
-              </div>
 
-              {/* Map Selection Strip with 5v5 Infantry / Combined Arms Filter + 3D Camera Preset */}
-              <div className="mb-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+                      {/* Solo vs Online Multiplayer */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onUpdateConfig({ mode: 'solo' })}
+                          className={`py-2 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
+                            config.mode === 'solo'
+                              ? 'bg-amber-500 border-amber-400 text-slate-950'
+                              : 'bg-[#0d121c] border-slate-700 text-slate-300 hover:border-slate-500'
+                          }`}
+                        >
+                          {config.matchMode === 'zombies' ? 'Solo Survival' : 'Solo vs AI'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onUpdateConfig({ mode: 'multiplayer' })}
+                          className={`py-2 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
+                            config.mode === 'multiplayer'
+                              ? 'bg-sky-500 border-sky-400 text-slate-950'
+                              : 'bg-[#0d121c] border-slate-700 text-slate-300 hover:border-slate-500'
+                          }`}
+                        >
+                          {config.matchMode === 'zombies' ? 'Co-op Zombies' : 'Online Multiplayer'}
+                        </button>
+                      </div>
+
+                      {config.mode === 'multiplayer' && (
+                        <div className="flex items-center gap-2 p-2 rounded-md bg-[#0d121c] border border-slate-800">
+                          <span className="text-[11px] text-slate-400 shrink-0">Room:</span>
+                          <input
+                            type="text"
+                            maxLength={20}
+                            value={config.roomId}
+                            onChange={(e) =>
+                              onUpdateConfig({
+                                roomId: e.target.value.replace(/[^a-zA-Z0-9_-]/g, '') || 'alpha-1',
+                              })
+                            }
+                            placeholder="Room ID"
+                            className="flex-1 min-w-0 px-2 py-1 rounded bg-[#121824] border border-slate-700 text-xs font-mono text-white"
+                          />
+                          {config.matchMode !== 'zombies' && (
+                            <button
+                              type="button"
+                              onClick={() => onUpdateConfig({ botFill: !config.botFill })}
+                              className={`px-2 py-1 rounded text-[11px] font-mono border shrink-0 cursor-pointer ${
+                                config.botFill
+                                  ? 'bg-slate-800 border-emerald-500/50 text-emerald-300'
+                                  : 'bg-slate-800 border-slate-700 text-slate-400'
+                              }`}
+                            >
+                              {config.botFill ? 'Bots ON' : 'Humans'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {config.matchMode === 'zombies' ? (
+                        <div className="rounded-md bg-lime-950/25 border border-lime-500/40 p-2.5 text-xs space-y-1">
+                          <div className="font-display font-bold text-lime-300 flex items-center gap-1.5">
+                            <Biohazard className="w-3.5 h-3.5" />
+                            Outbreak Survival Rules
+                          </div>
+                          <p className="text-[11px] text-slate-300 leading-snug">
+                            3 Lives · Wave clearing restores +35 HP, ammo &amp; +1 Frag · Armored Brutes drop +30 HP &amp; magazines · Friendly fire OFF in Co-op
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          {config.matchMode === 'tdm' && (
+                            <div>
+                              <div className="text-[11px] text-slate-400 mb-1">Your Faction</div>
+                              <div className="grid grid-cols-2 gap-2">
+                                {(['blue', 'red'] as TeamId[]).map((tid) => (
+                                  <button
+                                    key={tid}
+                                    type="button"
+                                    onClick={() => onUpdateConfig({ playerTeam: tid })}
+                                    className={`py-1.5 rounded-md text-xs font-semibold border cursor-pointer ${
+                                      config.playerTeam === tid
+                                        ? tid === 'blue'
+                                          ? 'bg-blue-600 border-blue-400 text-white'
+                                          : 'bg-red-600 border-red-400 text-white'
+                                        : 'bg-[#0d121c] border-slate-700 text-slate-300'
+                                    }`}
+                                  >
+                                    {tid === 'blue' ? 'Vanguard (Blue)' : 'Syndicate (Red)'}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <div>
+                              <div className="text-[11px] text-slate-400 mb-1">
+                                {config.matchMode === 'tdm' ? 'Squad Size' : 'Combatants'}
+                              </div>
+                              <div className="grid grid-cols-4 gap-1">
+                                {([4, 5, 6, 10] as const).map((sz) => (
+                                  <button
+                                    key={sz}
+                                    type="button"
+                                    onClick={() => onUpdateConfig({ teamSize: sz })}
+                                    className={`py-1.5 rounded text-[11px] font-medium border cursor-pointer ${
+                                      config.teamSize === sz
+                                        ? 'bg-blue-600 border-blue-400 text-white'
+                                        : 'bg-[#0d121c] border-slate-800 text-slate-300'
+                                    }`}
+                                  >
+                                    {config.matchMode === 'tdm' ? `${sz}v${sz}` : `${sz * 2}`}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {config.matchMode !== 'gun_game' && (
+                              <div>
+                                <div className="text-[11px] text-slate-400 mb-1">Kill Target</div>
+                                <div className="grid grid-cols-3 gap-1">
+                                  {([25, 50, 75] as const).map((lim) => (
+                                    <button
+                                      key={lim}
+                                      type="button"
+                                      onClick={() => onUpdateConfig({ scoreLimit: lim })}
+                                      className={`py-1.5 rounded text-[11px] font-mono border tabular-nums cursor-pointer ${
+                                        config.scoreLimit === lim
+                                          ? 'bg-blue-600 border-blue-400 text-white'
+                                          : 'bg-[#0d121c] border-slate-800 text-slate-300'
+                                      }`}
+                                    >
+                                      {lim}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      <div>
+                        <div className="text-[11px] text-slate-400 mb-1">
+                          {config.matchMode === 'zombies' ? 'Horde Intensity' : 'Bot Difficulty'}
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {(['recruit', 'tactical', 'veteran'] as Difficulty[]).map((d) => (
+                            <button
+                              key={d}
+                              type="button"
+                              onClick={() => onUpdateConfig({ difficulty: d })}
+                              className={`py-1.5 rounded-md text-xs font-medium capitalize border transition-colors cursor-pointer ${
+                                config.difficulty === d
+                                  ? 'bg-blue-600 border-blue-400 text-white'
+                                  : 'bg-[#0d121c] border-slate-800 text-slate-300 hover:border-slate-600'
+                              }`}
+                            >
+                              {d}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                            <span>Sensitivity</span>
+                            <span className="font-mono text-slate-200 tabular-nums">
+                              {config.sensitivity.toFixed(1)}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0.3}
+                            max={2.4}
+                            step={0.1}
+                            value={config.sensitivity}
+                            onChange={(e) => onUpdateConfig({ sensitivity: parseFloat(e.target.value) })}
+                            className="w-full accent-amber-500 cursor-pointer"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="text-[11px] text-slate-400 mb-1">Touch Controls</div>
+                          <div className="grid grid-cols-3 gap-1">
+                            {(['auto', 'on', 'off'] as TouchControlsMode[]).map((tm) => (
+                              <button
+                                key={tm}
+                                type="button"
+                                onClick={() => onUpdateConfig({ touchControls: tm })}
+                                className={`py-1 rounded text-[10px] font-medium uppercase border cursor-pointer ${
+                                  config.touchControls === tm
+                                    ? 'bg-cyan-600 border-cyan-400 text-white'
+                                    : 'bg-[#0d121c] border-slate-800 text-slate-300'
+                                }`}
+                              >
+                                {tm}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2.5 border-t border-slate-800/80 space-y-2.5">
+                      <div className="text-[10px] font-mono text-slate-400 flex flex-wrap gap-x-3 gap-y-1">
+                        <span>WASD Move</span>
+                        <span>LMB Fire</span>
+                        <span>RMB/F Scope</span>
+                        <span>R Reload</span>
+                        <span>E Interact</span>
+                        <span>T Trench</span>
+                        <span>X Strike</span>
+                        <span>G Frag</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={onStartMatch}
+                        className={`w-full flex items-center justify-center gap-2 px-5 py-3 rounded-lg font-bold text-sm transition-colors shadow-lg cursor-pointer ${
+                          config.matchMode === 'zombies'
+                            ? 'bg-lime-500 hover:bg-lime-400 text-slate-950'
+                            : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                        }`}
+                      >
+                        <Play className="w-4 h-4 fill-current" />
+                        {config.mode === 'multiplayer'
+                          ? `Join "${config.roomId}" · ${formatMatchModeLabel(config.matchMode)}`
+                          : `Deploy · ${formatMatchModeLabel(config.matchMode)} (${activeMap.name})`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {lobbyTab === 'arenas' && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="font-display text-base font-semibold text-slate-100">
-                      Select Combat Arena ({filteredMaps.length})
+                    <h2 className="font-display text-lg font-bold text-white">
+                      Combat Arenas ({filteredMaps.length})
                     </h2>
-                    <div className="flex items-center rounded-md bg-[#121824] border border-slate-800 p-0.5 text-[11px]">
+                    <div className="flex items-center rounded-md bg-[#121824] border border-slate-800 p-0.5 text-xs">
                       {(
                         [
                           { id: 'all', label: 'All (7)' },
@@ -871,7 +953,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                           key={tab.id}
                           type="button"
                           onClick={() => setMapFilter(tab.id)}
-                          className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
+                          className={`px-3 py-1 rounded transition-colors cursor-pointer ${
                             mapFilter === tab.id
                               ? 'bg-amber-500 text-slate-950 font-semibold'
                               : 'text-slate-300 hover:text-white'
@@ -884,10 +966,11 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] text-slate-400 mr-1">3D View:</span>
+                    <span className="text-xs text-slate-400 mr-1">3D Camera:</span>
                     {(
                       [
                         { id: 'orbit', label: 'Orbit' },
+                        { id: 'overview', label: 'Overview' },
                         { id: 'zone_a', label: 'Zone A' },
                         { id: 'zone_b', label: 'Zone B' },
                         { id: 'zone_c', label: 'Zone C' },
@@ -898,7 +981,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                         key={p.id}
                         type="button"
                         onClick={() => handleSelectPreset(p.id)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-mono border cursor-pointer ${
+                        className={`px-2.5 py-1 rounded text-[11px] font-mono border cursor-pointer ${
                           cameraPreset === p.id
                             ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
                             : 'bg-[#121824] border-slate-800 text-slate-400 hover:text-slate-200'
@@ -907,10 +990,17 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                         {p.label}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      onClick={onToggleInspect3D}
+                      className="px-2.5 py-1 rounded text-[11px] font-semibold bg-cyan-600/20 border border-cyan-500/50 text-cyan-200 hover:bg-cyan-600/35 cursor-pointer"
+                    >
+                      Full 3D View
+                    </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[60vh] overflow-y-auto touch-pan-y pr-1">
                   {filteredMaps.map((mid: MapId) => {
                     const m = MAPS[mid];
                     const selected = config.mapId === mid;
@@ -919,23 +1009,23 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                         key={mid}
                         type="button"
                         onClick={() => selectMap(mid)}
-                        className={`text-left p-3 rounded-lg border transition-colors cursor-pointer ${
+                        className={`text-left p-3.5 rounded-lg border transition-colors cursor-pointer ${
                           selected
-                            ? 'bg-slate-800/95 border-amber-400 text-white'
+                            ? 'bg-slate-800/95 border-amber-400 text-white shadow-lg'
                             : 'bg-[#121824] border-slate-800 hover:border-slate-600 text-slate-200'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2 mb-0.5">
-                          <span className="font-display text-sm font-bold text-white flex items-center gap-1.5 truncate">
-                            <MapPin className={`w-3.5 h-3.5 shrink-0 ${selected ? 'text-amber-400' : 'text-slate-400'}`} />
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="font-display text-base font-bold text-white flex items-center gap-1.5 truncate">
+                            <MapPin className={`w-4 h-4 shrink-0 ${selected ? 'text-amber-400' : 'text-slate-400'}`} />
                             <span className="truncate">{m.name}</span>
                           </span>
-                          <span className="text-[10px] font-mono text-slate-400 shrink-0">{m.sizeLabel}</span>
+                          <span className="text-[11px] font-mono text-slate-300 shrink-0">{m.sizeLabel}</span>
                         </div>
-                        <div className="flex items-center justify-between gap-1 mb-1">
-                          <span className="text-[10px] text-amber-300/90 truncate">{m.environment}</span>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="text-xs text-amber-300/90 truncate">{m.environment}</span>
                           <span
-                            className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
+                            className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
                               m.infantryOnly
                                 ? 'bg-cyan-500/15 border border-cyan-500/40 text-cyan-300'
                                 : 'bg-slate-900 border border-slate-700 text-slate-300'
@@ -944,7 +1034,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                             {m.infantryOnly ? '5v5 INFANTRY' : 'AIR & ARMOR'}
                           </span>
                         </div>
-                        <div className="flex flex-wrap gap-1 mb-1">
+                        <div className="flex flex-wrap gap-1 mb-2">
                           {m.zones.map((zn, idx) => (
                             <span
                               key={zn}
@@ -954,62 +1044,77 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                             </span>
                           ))}
                         </div>
-                        <p className="text-[11px] text-slate-400 leading-snug line-clamp-2">{m.description}</p>
+                        <p className="text-xs text-slate-400 leading-snug">{m.description}</p>
                       </button>
                     );
                   })}
                 </div>
               </div>
+            )}
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                {/* Left: 50-Weapon Starting Loadout with Pictures OR Gun Game Ladder */}
-                <div className="lg:col-span-7 flex flex-col">
-                  {config.matchMode === 'gun_game' ? (
-                    <div className="rounded-lg bg-[#121824] border border-amber-500/40 p-4 flex-1 flex flex-col">
-                      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-                        <h2 className="font-display text-base font-semibold text-white">
-                          Gun Game 18-Tier Weapon Progression
-                        </h2>
-                        <span className="text-xs font-mono text-amber-300">
-                          Every kill upgrades automatically · Arsenal swaps locked
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[410px] overflow-y-auto touch-pan-y pr-1">
-                        {GUN_GAME_LADDER.map((wid, idx) => {
-                          const w = WEAPONS[wid];
-                          return (
-                            <div
-                              key={`${idx}-${wid}`}
-                              className="p-2 rounded-lg bg-[#0d121c] border border-slate-800"
-                            >
-                              <div className="flex items-center justify-between text-[10px] font-mono mb-0.5">
-                                <span className="text-amber-400 font-bold">Tier {idx + 1}</span>
-                                <span className="text-slate-500">{w.caliber}</span>
-                              </div>
-                              <div className="font-display text-xs font-bold text-white truncate">
-                                {w.name}
-                              </div>
-                              <div className="mt-1 rounded bg-[#080c14] border border-slate-800/80 px-1.5 py-1">
-                                <WeaponArtwork weapon={w} className="w-full h-11" />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
-                        <h2 className="font-display text-base font-semibold text-slate-100">
-                          Starting 3-Slot Arsenal (50 Weapons)
-                        </h2>
-                        <span className="text-xs text-cyan-300">
-                          In-match swaps available at base Arsenal [E]
-                        </span>
-                      </div>
+            {lobbyTab === 'armory' && (
+              <div className="space-y-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="font-display text-lg font-bold text-white">
+                      Tactical Armory ({WEAPON_ORDER.length} Weapons)
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      Configure your 3-slot loadout for TDM, FFA &amp; Zombies or inspect all 18 Gun Game tiers
+                    </p>
+                  </div>
 
-                      {/* 3-Slot Selector with Gun Pictures */}
-                      <div className="grid grid-cols-3 gap-2 mb-2.5">
+                  <div className="flex items-center rounded-lg bg-[#121824] border border-slate-800 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setArmoryView('loadout')}
+                      className={`px-3 py-1 rounded-md text-xs font-medium cursor-pointer ${
+                        armoryView === 'loadout' ? 'bg-cyan-600 text-white font-semibold' : 'text-slate-300'
+                      }`}
+                    >
+                      3-Slot Workshop (50)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setArmoryView('ladder')}
+                      className={`px-3 py-1 rounded-md text-xs font-medium cursor-pointer ${
+                        armoryView === 'ladder' ? 'bg-amber-500 text-slate-950 font-semibold' : 'text-slate-300'
+                      }`}
+                    >
+                      Gun Game Ladder (18)
+                    </button>
+                  </div>
+                </div>
+
+                {armoryView === 'ladder' ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 max-h-[58vh] overflow-y-auto touch-pan-y pr-1">
+                    {GUN_GAME_LADDER.map((wid, idx) => {
+                      const w = WEAPONS[wid];
+                      return (
+                        <div
+                          key={`${idx}-${wid}`}
+                          className="p-2.5 rounded-lg bg-[#121824] border border-slate-800"
+                        >
+                          <div className="flex items-center justify-between text-[10px] font-mono mb-0.5">
+                            <span className="text-amber-400 font-bold">Tier {idx + 1}</span>
+                            <span className="text-slate-500">{w.caliber}</span>
+                          </div>
+                          <div className="font-display text-xs font-bold text-white truncate">{w.name}</div>
+                          <div className="mt-1.5 rounded bg-[#080c14] border border-slate-800/80 px-1.5 py-1">
+                            <WeaponArtwork weapon={w} className="w-full h-11" />
+                          </div>
+                          <div className="mt-1 text-[10px] text-slate-400 font-mono">
+                            DMG {w.damage * w.pellets} · {w.rpm} RPM
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                    {/* Left 4 Cols: 3-Slot Selector + Featured Inspection Card */}
+                    <div className="lg:col-span-4 space-y-3">
+                      <div className="grid grid-cols-3 lg:grid-cols-1 gap-2">
                         {SLOT_CONFIGS.map((slot) => {
                           const wid = carriedIds[slot.idx];
                           const w = WEAPONS[wid];
@@ -1019,66 +1124,77 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                               key={slot.idx}
                               type="button"
                               onClick={() => setEditingSlot(slot.idx)}
-                              className={`text-left px-2.5 py-2 rounded-lg border transition-colors cursor-pointer ${
+                              className={`text-left p-2.5 rounded-lg border transition-colors cursor-pointer ${
                                 isEditing
                                   ? 'bg-cyan-500/15 border-cyan-400 text-white'
                                   : 'bg-[#121824] border-slate-800 hover:border-slate-600 text-slate-300'
                               }`}
                             >
-                              <div className="text-[10px] font-mono font-bold text-amber-400">
-                                {slot.label}
+                              <div className="flex items-center justify-between text-[10px] font-mono">
+                                <span className="font-bold text-amber-400">{slot.label}</span>
+                                <span className="hidden sm:inline text-slate-400">{w.caliber}</span>
                               </div>
-                              <div className="font-display text-xs font-bold text-white truncate mt-0.5">
-                                {w.name}
-                              </div>
-                              <div className="mt-1 rounded bg-[#080c14] border border-slate-800/80 px-1.5 py-1">
-                                <WeaponArtwork weapon={w} className="w-full h-9" />
-                              </div>
-                              <div className="text-[10px] text-slate-400 truncate mt-1">
-                                {w.caliber}
+                              <div className="flex items-center justify-between gap-2 mt-1">
+                                <span className="font-display text-xs sm:text-sm font-bold text-white truncate">
+                                  {w.name}
+                                </span>
+                                <div className="hidden lg:block w-24 shrink-0 rounded bg-[#080c14] border border-slate-800 px-1.5 py-0.5">
+                                  <WeaponArtwork weapon={w} className="w-full h-8" />
+                                </div>
                               </div>
                             </button>
                           );
                         })}
                       </div>
 
-                      {/* Featured Active Slot Weapon Display */}
-                      <div className="mb-2.5 rounded-lg bg-[#101623] border border-slate-800 p-2.5 flex flex-col sm:flex-row items-center gap-3">
-                        <div className="w-full sm:w-48 shrink-0 rounded bg-[#080c14] border border-slate-800 px-2.5 py-1.5">
-                          <WeaponArtwork weapon={showcaseWeapon} className="w-full h-14" />
+                      {/* Featured Showcase */}
+                      <div className="rounded-lg bg-[#101623] border border-slate-800 p-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-mono text-cyan-300">
+                            Editing Slot [{editingSlot + 1}]
+                          </span>
+                          <span className="text-[11px] font-mono text-slate-400">
+                            {showcaseWeapon.optic.toUpperCase()} Optic
+                          </span>
                         </div>
-                        <div className="flex-1 min-w-0 w-full">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-display text-sm font-bold text-white truncate">
-                              {showcaseWeapon.name}
-                            </span>
-                            <span className="text-[10px] font-mono text-cyan-300 shrink-0">
-                              Slot [{editingSlot + 1}] Equipped
-                            </span>
+                        <div className="rounded-lg bg-[#080c14] border border-slate-800 px-3 py-2">
+                          <WeaponArtwork weapon={showcaseWeapon} className="w-full h-20" />
+                        </div>
+                        <div>
+                          <div className="font-display text-base font-bold text-white">
+                            {showcaseWeapon.name}
                           </div>
-                          <div className="text-[11px] text-slate-400 mt-0.5">
-                            {showcaseWeapon.role} · {showcaseWeapon.caliber} · {showcaseWeapon.optic.toUpperCase()} Optic
+                          <div className="text-xs text-slate-400">
+                            {showcaseWeapon.role} · {showcaseWeapon.caliber} · {showcaseWeapon.fireMode}
                           </div>
-                          <div className="flex flex-wrap gap-3 mt-1.5 text-[10px] font-mono text-slate-300">
-                            <span>DMG {showcaseWeapon.damage * showcaseWeapon.pellets}</span>
-                            <span>{showcaseWeapon.rpm} RPM</span>
-                            <span>{showcaseWeapon.muzzleVelocity} m/s</span>
-                            <span>
-                              {showcaseWeapon.magSize}/{showcaseWeapon.reserveMax} rds
-                            </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono pt-1 border-t border-slate-800">
+                          <div className="text-slate-300">
+                            DMG <span className="text-amber-300 font-bold">{showcaseWeapon.damage * showcaseWeapon.pellets}</span>
+                          </div>
+                          <div className="text-slate-300">
+                            ROF <span className="text-sky-300 font-bold">{showcaseWeapon.rpm} RPM</span>
+                          </div>
+                          <div className="text-slate-300">
+                            VEL <span className="text-emerald-300 font-bold">{showcaseWeapon.muzzleVelocity} m/s</span>
+                          </div>
+                          <div className="text-slate-300">
+                            MAG <span className="text-white font-bold">{showcaseWeapon.magSize}/{showcaseWeapon.reserveMax}</span>
                           </div>
                         </div>
                       </div>
+                    </div>
 
-                      {/* Category Filter + Search */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    {/* Right 8 Cols: Filters + Weapon Grid */}
+                    <div className="lg:col-span-8 flex flex-col gap-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-1">
                           {WEAPON_CATEGORIES.map((cat) => (
                             <button
                               key={cat.id}
                               type="button"
                               onClick={() => setWeaponCategory(cat.id)}
-                              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
                                 weaponCategory === cat.id
                                   ? 'bg-amber-500 text-slate-950 font-semibold'
                                   : 'bg-[#121824] text-slate-300 hover:bg-slate-800'
@@ -1088,20 +1204,19 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                             </button>
                           ))}
                         </div>
-                        <div className="relative w-full sm:w-44">
+                        <div className="relative w-full sm:w-48">
                           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                           <input
                             type="text"
                             value={weaponQuery}
                             onChange={(e) => setWeaponQuery(e.target.value)}
-                            placeholder="Search weapon..."
-                            className="w-full pl-8 pr-2.5 py-1 rounded bg-[#121824] border border-slate-700 focus:border-cyan-400 focus:outline-none text-xs text-white"
+                            placeholder="Search 50 guns..."
+                            className="w-full pl-8 pr-2.5 py-1.5 rounded bg-[#121824] border border-slate-700 focus:border-cyan-400 focus:outline-none text-xs text-white"
                           />
                         </div>
                       </div>
 
-                      {/* Scrollable 50-weapon Picker with Gun Artwork in Every Card */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[280px] overflow-y-auto touch-pan-y pr-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[50vh] overflow-y-auto touch-pan-y pr-1">
                         {filteredWeapons.map((wid: WeaponId) => {
                           const w = WEAPONS[wid];
                           const slotMatch = carriedIds.indexOf(wid);
@@ -1123,7 +1238,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                                   : 'bg-[#121824] border-slate-800 hover:border-slate-600 text-slate-200'
                               }`}
                             >
-                              <div className="flex items-start justify-between gap-2 mb-0.5">
+                              <div className="flex items-start justify-between gap-1.5 mb-0.5">
                                 <span className="font-display text-xs font-bold text-white truncate">
                                   {w.name}
                                 </span>
@@ -1144,23 +1259,23 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                                 {w.caliber} · {w.fireMode} · {w.magSize}/{w.reserveMax}
                               </div>
                               <div className="my-1.5 rounded bg-[#080c14] border border-slate-800/80 px-2 py-1">
-                                <WeaponArtwork weapon={w} className="w-full h-12" />
+                                <WeaponArtwork weapon={w} className="w-full h-11" />
                               </div>
                               <div className="space-y-1 text-[10px] text-slate-400">
                                 <div className="flex items-center gap-2">
-                                  <span className="w-10 shrink-0">Power</span>
+                                  <span className="w-9 shrink-0">Power</span>
                                   <div className="flex-1 h-1 bg-slate-900 rounded-sm overflow-hidden">
                                     <div className="h-full bg-amber-400" style={{ width: `${dmgPct}%` }} />
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <span className="w-10 shrink-0">ROF</span>
+                                  <span className="w-9 shrink-0">ROF</span>
                                   <div className="flex-1 h-1 bg-slate-900 rounded-sm overflow-hidden">
                                     <div className="h-full bg-sky-400" style={{ width: `${rofPct}%` }} />
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <span className="w-10 shrink-0">Range</span>
+                                  <span className="w-9 shrink-0">Range</span>
                                   <div className="flex-1 h-1 bg-slate-900 rounded-sm overflow-hidden">
                                     <div className="h-full bg-emerald-400" style={{ width: `${rngPct}%` }} />
                                   </div>
@@ -1170,164 +1285,371 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                           );
                         })}
                       </div>
-                    </>
-                  )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {lobbyTab === 'rooms' && (
+              <div className="space-y-4">
+                {/* Quick Mode / Map Launchers */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                  {[
+                    { label: 'Killhouse Zombies', mapId: 'killhouse' as MapId, matchMode: 'zombies' as MatchMode, teamSize: 5 as const, roomId: 'zombies-cqb' },
+                    { label: 'Pacific Outbreak', mapId: 'island' as MapId, matchMode: 'zombies' as MatchMode, teamSize: 10 as const, roomId: 'zombies-isle' },
+                    { label: '5v5 Killhouse TDM', mapId: 'killhouse' as MapId, matchMode: 'tdm' as MatchMode, teamSize: 5 as const, roomId: 'cqb-5v5' },
+                    { label: '5v5 Metro FFA', mapId: 'metro' as MapId, matchMode: 'ffa' as MatchMode, teamSize: 5 as const, roomId: 'metro-ffa' },
+                    { label: 'Rooftop Gun Game', mapId: 'rooftop' as MapId, matchMode: 'gun_game' as MatchMode, teamSize: 5 as const, roomId: 'gungame-1' },
+                    { label: 'Pacific Combined', mapId: 'island' as MapId, matchMode: 'tdm' as MatchMode, teamSize: 10 as const, roomId: 'pacific-hq' },
+                  ].map((preset) => (
+                    <button
+                      key={preset.roomId}
+                      type="button"
+                      onClick={() =>
+                        onUpdateConfig({
+                          mode: 'multiplayer',
+                          mapId: preset.mapId,
+                          matchMode: preset.matchMode,
+                          playerTeam: preset.matchMode === 'zombies' ? 'blue' : config.playerTeam,
+                          teamSize: preset.teamSize,
+                          roomId: preset.roomId,
+                          botFill: true,
+                        })
+                      }
+                      className={`text-left p-2.5 rounded-lg border transition-colors cursor-pointer ${
+                        config.mode === 'multiplayer' && config.roomId === preset.roomId
+                          ? preset.matchMode === 'zombies'
+                            ? 'bg-lime-500/15 border-lime-400 text-white'
+                            : 'bg-sky-500/15 border-sky-400 text-white'
+                          : 'bg-[#121824] border-slate-800 hover:border-slate-600 text-slate-200'
+                      }`}
+                    >
+                      <div className="text-xs font-display font-bold truncate">{preset.label}</div>
+                      <div className="text-[10px] font-mono text-slate-400 mt-0.5 truncate">
+                        {preset.matchMode === 'zombies' ? 'CO-OP HORDE' : MAPS[preset.mapId].sizeLabel} · {preset.roomId}
+                      </div>
+                    </button>
+                  ))}
                 </div>
 
-                {/* Right: Match Rules & Controls */}
-                <div className="lg:col-span-5 flex flex-col justify-between gap-4">
-                  <div className="space-y-3.5">
-                    <h2 className="font-display text-base font-semibold text-slate-100 flex items-center gap-2">
-                      <SlidersHorizontal className="w-4 h-4 text-amber-400" />
-                      {formatMatchModeLabel(config.matchMode)} Rules
-                    </h2>
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                  {/* Room Config */}
+                  <div className="lg:col-span-5 rounded-lg bg-[#121824] border border-slate-800 p-4 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <h2 className="font-display text-base font-semibold text-white flex items-center gap-2">
+                        <Globe className="w-4 h-4 text-sky-400" />
+                        Host or Join Room
+                      </h2>
+                      <span className="text-[11px] font-mono text-emerald-400">Live WebSocket</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">Room Code</label>
+                        <input
+                          type="text"
+                          maxLength={20}
+                          value={config.roomId}
+                          onChange={(e) =>
+                            onUpdateConfig({
+                              mode: 'multiplayer',
+                              roomId: e.target.value.replace(/[^a-zA-Z0-9_-]/g, '') || 'alpha-1',
+                            })
+                          }
+                          placeholder="alpha-1"
+                          className="w-full px-3 py-1.5 rounded-md bg-[#0d121c] border border-slate-700 focus:border-sky-400 focus:outline-none text-xs font-mono text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">Arena Map</label>
+                        <select
+                          value={config.mapId}
+                          onChange={(e) => selectMap(e.target.value as MapId)}
+                          className="w-full px-2.5 py-1.5 rounded-md bg-[#0d121c] border border-slate-700 focus:border-sky-400 focus:outline-none text-xs text-white"
+                        >
+                          {MAP_ORDER.map((mid) => (
+                            <option key={mid} value={mid}>
+                              {MAPS[mid].name} {MAPS[mid].infantryOnly ? '(5v5 Infantry)' : '(Combined Arms)'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
 
                     <div>
-                      <div className="text-xs text-slate-400 mb-1.5">
-                        {config.matchMode === 'tdm' ? 'Squad Size' : 'Combatant Count'}
-                      </div>
-                      <div className="grid grid-cols-4 gap-2">
-                        {([4, 5, 6, 10] as const).map((sz) => (
+                      <label className="block text-[11px] text-slate-400 mb-1.5">Game Mode</label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {MODE_CARDS.map((mc) => (
                           <button
-                            key={sz}
+                            key={mc.id}
                             type="button"
-                            onClick={() => onUpdateConfig({ teamSize: sz })}
-                            className={`py-2 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
-                              config.teamSize === sz
-                                ? 'bg-blue-600 border-blue-400 text-white'
-                                : 'bg-[#121824] border-slate-800 text-slate-300 hover:border-slate-600'
+                            onClick={() =>
+                              onUpdateConfig({
+                                matchMode: mc.id,
+                                mode: 'multiplayer',
+                                playerTeam: mc.id === 'zombies' ? 'blue' : config.playerTeam,
+                              })
+                            }
+                            className={`py-1.5 px-2 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer ${
+                              config.matchMode === mc.id
+                                ? mc.id === 'zombies'
+                                  ? 'bg-lime-500 border-lime-400 text-slate-950'
+                                  : 'bg-amber-500 border-amber-400 text-slate-950'
+                                : 'bg-[#0d121c] border-slate-800 text-slate-300 hover:border-slate-600'
                             }`}
                           >
-                            {config.matchMode === 'tdm' ? `${sz}v${sz}` : `${sz * 2} P`}
+                            {mc.title}
                           </button>
                         ))}
                       </div>
                     </div>
 
-                    {config.matchMode !== 'gun_game' && (
+                    {config.matchMode === 'tdm' && (
                       <div>
-                        <div className="text-xs text-slate-400 mb-1.5">Elimination Target</div>
-                        <div className="grid grid-cols-3 gap-2">
-                          {([25, 50, 75] as const).map((lim) => (
+                        <label className="block text-[11px] text-slate-400 mb-1.5">Your Faction</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(['blue', 'red'] as TeamId[]).map((tid) => (
                             <button
-                              key={lim}
+                              key={tid}
                               type="button"
-                              onClick={() => onUpdateConfig({ scoreLimit: lim })}
-                              className={`py-2 rounded-md text-xs font-medium font-mono tabular-nums border transition-colors cursor-pointer ${
-                                config.scoreLimit === lim
-                                  ? 'bg-blue-600 border-blue-400 text-white'
-                                  : 'bg-[#121824] border-slate-800 text-slate-300 hover:border-slate-600'
+                              onClick={() => onUpdateConfig({ playerTeam: tid, mode: 'multiplayer' })}
+                              className={`py-1.5 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
+                                config.playerTeam === tid
+                                  ? tid === 'blue'
+                                    ? 'bg-blue-600 border-blue-400 text-white'
+                                    : 'bg-red-600 border-red-400 text-white'
+                                  : 'bg-[#0d121c] border-slate-800 text-slate-300 hover:border-slate-600'
                               }`}
                             >
-                              {lim} Kills
+                              {tid === 'blue' ? 'Vanguard (Blue)' : 'Syndicate (Red)'}
                             </button>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    <div>
-                      <div className="text-xs text-slate-400 mb-1.5">Bot Difficulty</div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {(['recruit', 'tactical', 'veteran'] as Difficulty[]).map((d) => (
-                          <button
-                            key={d}
-                            type="button"
-                            onClick={() => onUpdateConfig({ difficulty: d })}
-                            className={`py-2 rounded-md text-xs font-medium capitalize border transition-colors cursor-pointer ${
-                              config.difficulty === d
-                                ? 'bg-blue-600 border-blue-400 text-white'
-                                : 'bg-[#121824] border-slate-800 text-slate-300 hover:border-slate-600'
-                            }`}
-                          >
-                            {d}
-                          </button>
-                        ))}
+                    {config.matchMode !== 'zombies' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onUpdateConfig({ botFill: true, mode: 'multiplayer' })}
+                          className={`py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
+                            config.botFill
+                              ? 'bg-sky-600 border-sky-400 text-white'
+                              : 'bg-[#0d121c] border-slate-800 text-slate-300'
+                          }`}
+                        >
+                          Bots + Humans ({config.teamSize}v{config.teamSize})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onUpdateConfig({ botFill: false, mode: 'multiplayer' })}
+                          className={`py-1.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
+                            !config.botFill
+                              ? 'bg-sky-600 border-sky-400 text-white'
+                              : 'bg-[#0d121c] border-slate-800 text-slate-300'
+                          }`}
+                        >
+                          Humans Only
+                        </button>
                       </div>
-                    </div>
+                    )}
 
-                    <div>
-                      <div className="flex justify-between text-xs text-slate-400 mb-1">
-                        <span>Aim Sensitivity</span>
-                        <span className="font-mono text-slate-200 tabular-nums">
-                          {config.sensitivity.toFixed(1)}
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0.3}
-                        max={2.4}
-                        step={0.1}
-                        value={config.sensitivity}
-                        onChange={(e) => onUpdateConfig({ sensitivity: parseFloat(e.target.value) })}
-                        className="w-full accent-amber-500 cursor-pointer"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-slate-400 mb-1.5">Mobile / Touch Controls</div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {(['auto', 'on', 'off'] as TouchControlsMode[]).map((tm) => (
-                          <button
-                            key={tm}
-                            type="button"
-                            onClick={() => onUpdateConfig({ touchControls: tm })}
-                            className={`py-1.5 rounded-md text-xs font-medium uppercase border transition-colors cursor-pointer ${
-                              config.touchControls === tm
-                                ? 'bg-cyan-600 border-cyan-400 text-white'
-                                : 'bg-[#121824] border-slate-800 text-slate-300 hover:border-slate-600'
-                            }`}
-                          >
-                            {tm}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (config.mode !== 'multiplayer') {
+                          onUpdateConfig({ mode: 'multiplayer' });
+                        }
+                        onStartMatch();
+                      }}
+                      className={`w-full flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-colors cursor-pointer ${
+                        config.matchMode === 'zombies'
+                          ? 'bg-lime-500 hover:bg-lime-400 text-slate-950'
+                          : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                      }`}
+                    >
+                      <Play className="w-4 h-4 fill-current" />
+                      Connect &amp; Join &ldquo;{config.roomId}&rdquo;
+                    </button>
                   </div>
 
-                  {/* Controls Quick Reference */}
-                  <div className="pt-3 border-t border-slate-800 text-xs text-slate-400 space-y-1">
-                    <div className="text-slate-200 font-medium mb-1">Combat Controls</div>
-                    <div className="flex justify-between">
-                      <span>Move / Sprint / Jump</span>
-                      <span className="font-mono text-slate-300">WASD · Shift · Space</span>
+                  {/* Active Rooms List */}
+                  <div className="lg:col-span-7 rounded-lg bg-[#121824] border border-slate-800 p-4 flex flex-col">
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="font-display text-base font-semibold text-white flex items-center gap-2">
+                        <Users className="w-4 h-4 text-amber-400" />
+                        Active Multiplayer Rooms ({rooms.length})
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={() => void refreshRooms()}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 cursor-pointer"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${loadingRooms ? 'animate-spin' : ''}`} />
+                        Refresh
+                      </button>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Fire / Scope &amp; Lock-On</span>
-                      <span className="font-mono text-slate-300">LMB · RMB or F</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Switch Slots / Reload</span>
-                      <span className="font-mono text-slate-300">1–3 / Q / Wheel · R</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Arsenal / Hangar / Vehicle / Mount</span>
-                      <span className="font-mono text-slate-300">E</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Dig Trench / Air Strike / Frag</span>
-                      <span className="font-mono text-slate-300">T · X · G</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Mute Audio / Scoreboard</span>
-                      <span className="font-mono text-slate-300">M · Tab</span>
-                    </div>
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={onStartMatch}
-                    className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition-colors shadow-lg cursor-pointer"
-                  >
-                    <Play className="w-4 h-4 fill-current" />
-                    {config.mode === 'multiplayer'
-                      ? `Join "${config.roomId}" (${formatMatchModeLabel(config.matchMode)})`
-                      : `Deploy (${formatMatchModeLabel(config.matchMode)} · ${activeMap.name})`}
-                  </button>
+                    {rooms.length === 0 ? (
+                      <div className="flex-1 flex flex-col items-center justify-center py-10 text-center border border-dashed border-slate-800 rounded-lg">
+                        <Globe className="w-8 h-8 text-slate-600 mb-2" />
+                        <div className="text-sm font-medium text-slate-300">No active human rooms yet</div>
+                        <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                          Select a quick preset above (like <span className="font-mono text-lime-300">zombies-cqb</span> or <span className="font-mono text-slate-300">cqb-5v5</span>) and click Connect. Other players see your room live here!
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-72 overflow-y-auto">
+                        {rooms.map((rm) => (
+                          <div
+                            key={rm.roomId}
+                            className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-[#0d121c] border border-slate-800 hover:border-sky-500/60"
+                          >
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-mono font-bold text-sm text-white">{rm.roomId}</span>
+                                <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 font-medium">
+                                  {MAPS[rm.mapId]?.name || rm.mapId}
+                                </span>
+                                <span
+                                  className={`text-[11px] px-1.5 py-0.5 rounded border font-mono ${
+                                    rm.matchMode === 'zombies'
+                                      ? 'bg-lime-500/15 border-lime-500/40 text-lime-300'
+                                      : 'bg-sky-500/15 border-sky-500/30 text-sky-300'
+                                  }`}
+                                >
+                                  {formatMatchModeLabel(rm.matchMode)}
+                                  {rm.matchMode !== 'zombies' && ` · ${rm.teamSize || 5}v${rm.teamSize || 5}`}
+                                </span>
+                                <span className="text-[11px] font-mono text-slate-400">
+                                  {rm.matchMode === 'zombies'
+                                    ? 'Co-op Survivors'
+                                    : rm.botFill
+                                    ? 'Bots + Humans'
+                                    : 'Humans Only'}
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-400 mt-1 font-mono">
+                                {rm.matchMode === 'zombies'
+                                  ? `Wave ${rm.zombieWave || 1} · ${rm.blueScore} Infected Slain`
+                                  : rm.matchMode === 'tdm'
+                                  ? `Score: ${rm.blueScore} - ${rm.redScore} / ${rm.scoreLimit}`
+                                  : `Target: ${rm.matchMode === 'gun_game' ? '18 Tiers' : `${rm.scoreLimit} Kills`}`}{' '}
+                                · {rm.humanCount}/{rm.maxHumans} Players
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onUpdateConfig({
+                                  mode: 'multiplayer',
+                                  roomId: rm.roomId,
+                                  mapId: rm.mapId,
+                                  matchMode: rm.matchMode || 'tdm',
+                                  playerTeam: rm.matchMode === 'zombies' ? 'blue' : config.playerTeam,
+                                  teamSize: ([4, 5, 6, 10].includes(rm.teamSize)
+                                    ? rm.teamSize
+                                    : 5) as 4 | 5 | 6 | 10,
+                                  scoreLimit: rm.scoreLimit,
+                                  botFill: rm.botFill,
+                                });
+                                onStartMatch();
+                              }}
+                              className="px-4 py-1.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold cursor-pointer"
+                            >
+                              Join Room
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </>
-          )}
+            )}
+
+            {lobbyTab === 'about' && (
+              <div className="space-y-4">
+                <div className="rounded-lg bg-[#121824] border border-slate-800 p-5">
+                  <div className="flex items-center gap-2 text-amber-400 text-xs font-mono uppercase tracking-wider mb-2">
+                    <Code2 className="w-4 h-4" />
+                    Development Team
+                  </div>
+                  <h2 className="font-display text-xl font-bold text-white mb-1">
+                    Created by VictorTheGreat &amp; Williamson22
+                  </h2>
+                  <p className="text-sm text-slate-400 leading-relaxed">
+                    Vanguard Arena is developed by <span className="text-slate-100 font-semibold">VictorTheGreat</span> and{' '}
+                    <span className="text-slate-100 font-semibold">Williamson22</span> as a browser-based 3D tactical shooter featuring Team Deathmatch, Free-For-All, 18-Tier Gun Game, Zombie Outbreak Survival, 5v5 infantry CQB maps, combined-arms battlefields, 50 firearms, and real-time WebSocket multiplayer.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                    <div className="rounded-lg bg-[#0d121c] border border-slate-800 p-4">
+                      <div className="font-display text-base font-bold text-white">VictorTheGreat</div>
+                      <div className="text-xs text-amber-400 mt-0.5">Developer</div>
+                    </div>
+                    <div className="rounded-lg bg-[#0d121c] border border-slate-800 p-4">
+                      <div className="font-display text-base font-bold text-white">Williamson22</div>
+                      <div className="text-xs text-amber-400 mt-0.5">Developer</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="rounded-lg bg-[#121824] border border-slate-800 p-5">
+                    <h3 className="font-display text-sm font-semibold text-slate-100 mb-2 flex items-center gap-1.5">
+                      <Flame className="w-4 h-4 text-lime-400" />
+                      4 Combat Modes &amp; Zombie Horde Survival
+                    </h3>
+                    <ul className="text-xs text-slate-400 space-y-1.5 leading-relaxed">
+                      <li>Zombie Survival: Escalating waves of Walkers, Feral Runners &amp; Armored Brutes with outbreak twilight &amp; co-op MP support</li>
+                      <li>Team Deathmatch, Free-For-All, and 18-Tier Gun Game Escalation</li>
+                      <li>3 tight 5v5 Infantry Arenas (Cargo Killhouse, Subway Concourse, Skyline Helideck)</li>
+                      <li>4 Combined-Arms Arenas (Industrial Yard, Desert Outpost, Cryo Bunker, Pacific Archipelago)</li>
+                    </ul>
+                  </div>
+
+                  <div className="rounded-lg bg-[#121824] border border-slate-800 p-5 flex flex-col justify-between gap-4">
+                    <div>
+                      <h3 className="font-display text-sm font-semibold text-slate-100 mb-2">
+                        50 Weapons &amp; Interactive 3D Preview
+                      </h3>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        Orbit any arena live behind the Command Lobby or click Inspect 3D to fly directly to Zones A, B, C, and the base Arsenal. Customize all 3 slots in Armory or jump directly into Co-op Multiplayer rooms.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={onOpenAndroidApp}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/45 text-emerald-300 text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        <Smartphone className="w-3.5 h-3.5" />
+                        Get Android App
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLobbyTab('command')}
+                        className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
+                      >
+                        Back to Command
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onStartMatch}
+                        className="flex items-center gap-2 px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs transition-colors cursor-pointer"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        Deploy to Match
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -1341,7 +1663,8 @@ export const GameMenus: React.FC<GameMenusProps> = ({
             <div>
               <h2 className="font-display text-2xl font-bold text-white">Match Paused</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                {formatMatchModeLabel(hud.matchMode)} · Adjust sensitivity or resume combat
+                {formatMatchModeLabel(hud.matchMode)}
+                {hud.matchMode === 'zombies' && hud.zombies ? ` · Wave ${hud.zombies.wave}` : ''} · Adjust sensitivity or resume combat
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2.5">
@@ -1358,7 +1681,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                 onClick={onReturnToLobby}
                 className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
               >
-                Exit to Loadout
+                Exit to Lobby
               </button>
               <button
                 type="button"
@@ -1417,6 +1740,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
             redScore={hud.redScore}
             scoreLimit={hud.scoreLimit}
             matchMode={hud.matchMode}
+            zombieWave={hud.zombies?.wave}
           />
         </div>
       </div>
@@ -1424,10 +1748,13 @@ export const GameMenus: React.FC<GameMenusProps> = ({
   }
 
   if (hud.phase === 'ended') {
+    const isZombies = hud.matchMode === 'zombies';
     const isFfa = hud.matchMode === 'ffa' || hud.matchMode === 'gun_game';
     const blueWon = hud.winner === 'blue';
-    const isDraw = !isFfa && hud.winner === 'draw';
-    const playerWon = isFfa
+    const isDraw = !isFfa && !isZombies && hud.winner === 'draw';
+    const playerWon = isZombies
+      ? hud.winner === 'blue'
+      : isFfa
       ? hud.winnerName === hud.playerUsername
       : hud.winner === hud.playerTeam;
     return (
@@ -1437,7 +1764,11 @@ export const GameMenus: React.FC<GameMenusProps> = ({
             <div className="flex items-center gap-4">
               <div
                 className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                  isFfa
+                  isZombies
+                    ? playerWon
+                      ? 'bg-lime-500/20 text-lime-400 border border-lime-500/40'
+                      : 'bg-red-600/25 text-red-400 border border-red-500/40'
+                    : isFfa
                     ? playerWon
                       ? 'bg-emerald-600/25 text-emerald-400 border border-emerald-500/40'
                       : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
@@ -1448,11 +1779,15 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                     : 'bg-red-600/25 text-red-400 border border-red-500/40'
                 }`}
               >
-                <Shield className="w-6 h-6" />
+                {isZombies ? <Biohazard className="w-6 h-6" /> : <Shield className="w-6 h-6" />}
               </div>
               <div>
                 <h2 className="font-display text-3xl font-bold text-white">
-                  {isFfa
+                  {isZombies
+                    ? playerWon
+                      ? 'Outbreak Repelled'
+                      : 'Overrun by the Horde'
+                    : isFfa
                     ? `${hud.winnerName || hud.scoreboard[0]?.name || 'Champion'} Victory`
                     : blueWon
                     ? 'Vanguard Victory'
@@ -1461,7 +1796,11 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                     : 'Syndicate Victory'}
                 </h2>
                 <p className="text-sm text-slate-400 mt-0.5 font-mono tabular-nums">
-                  {isFfa ? (
+                  {isZombies ? (
+                    <>
+                      Reached Wave {hud.zombies?.wave ?? 1} · {hud.blueScore} Infected Slain
+                    </>
+                  ) : isFfa ? (
                     <>
                       {hud.matchMode === 'gun_game'
                         ? 'Gun Game Escalation Champion'
@@ -1490,7 +1829,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
                 onClick={onReturnToLobby}
                 className="px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition-colors cursor-pointer"
               >
-                Change Loadout
+                Return to Lobby
               </button>
               <button
                 type="button"
@@ -1509,6 +1848,7 @@ export const GameMenus: React.FC<GameMenusProps> = ({
             redScore={hud.redScore}
             scoreLimit={hud.scoreLimit}
             matchMode={hud.matchMode}
+            zombieWave={hud.zombies?.wave}
           />
         </div>
       </div>

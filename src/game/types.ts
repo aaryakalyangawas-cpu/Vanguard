@@ -99,7 +99,9 @@ export type MapId =
   | 'metro'
   | 'rooftop';
 
-export type MatchMode = 'tdm' | 'ffa' | 'gun_game';
+export type MatchMode = 'tdm' | 'ffa' | 'gun_game' | 'zombies';
+
+export type ZombieVariant = 'walker' | 'runner' | 'brute';
 
 export interface ArenaZoneInfo {
   id: 'A' | 'B' | 'C';
@@ -198,6 +200,7 @@ export interface MultiplayerRoomSummary {
   maxHumans: number;
   blueScore: number;
   redScore: number;
+  zombieWave?: number;
 }
 
 export type TouchControlsMode = 'auto' | 'on' | 'off';
@@ -258,6 +261,7 @@ export interface RadarBlip {
   z: number;
   team:
     | TeamId
+    | 'zombie'
     | 'pickup_health'
     | 'pickup_ammo'
     | 'turret'
@@ -298,6 +302,17 @@ export interface GunGameHudState {
   nextWeaponId: WeaponId | null;
   leaderName: string;
   leaderTier: number;
+}
+
+export interface ZombieHudState {
+  wave: number;
+  zombiesAlive: number;
+  zombiesRemaining: number;
+  intermissionTimer: number;
+  livesLeft: number;
+  maxLives: number;
+  totalZombieKills: number;
+  brutesRemaining: number;
 }
 
 export interface HudSnapshot {
@@ -343,6 +358,7 @@ export interface HudSnapshot {
   winner: TeamId | 'draw' | null;
   winnerName: string | null;
   gunGame: GunGameHudState | null;
+  zombies: ZombieHudState | null;
   pointerLocked: boolean;
   isTouchDevice: boolean;
   touchControlsActive: boolean;

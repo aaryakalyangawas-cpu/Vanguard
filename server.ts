@@ -20,7 +20,7 @@ interface StoredAccount {
   createdAt: number;
 }
 
-type MatchMode = 'tdm' | 'ffa' | 'gun_game';
+type MatchMode = 'tdm' | 'ffa' | 'gun_game' | 'zombies';
 
 interface RoomPlayer {
   id: string;
@@ -69,6 +69,7 @@ interface MultiplayerRoom {
   blueScore: number;
   redScore: number;
   winnerName: string | null;
+  zombieWave: number;
   timeRemaining: number;
   players: Map<string, RoomPlayer>;
   vehicles: Map<string, RoomVehicleState>;
@@ -235,6 +236,7 @@ async function startServer() {
       maxHumans: 20,
       blueScore: r.blueScore,
       redScore: r.redScore,
+      zombieWave: r.zombieWave,
     }));
     res.json({ rooms: list });
   });
@@ -296,6 +298,7 @@ async function startServer() {
       blueScore: room.blueScore,
       redScore: room.redScore,
       winnerName: room.winnerName,
+      zombieWave: room.zombieWave,
       timeRemaining: room.timeRemaining,
       players,
       vehicles,
@@ -344,7 +347,7 @@ async function startServer() {
         if (!room) {
           const rawMode = String(msg.matchMode || 'tdm');
           const matchMode: MatchMode =
-            rawMode === 'ffa' || rawMode === 'gun_game' ? rawMode : 'tdm';
+            rawMode === 'ffa' || rawMode === 'gun_game' || rawMode === 'zombies' ? rawMode : 'tdm';
           const rawTeamSize = Number(msg.teamSize);
           const teamSize =
             rawTeamSize === 4 || rawTeamSize === 5 || rawTeamSize === 6 || rawTeamSize === 10
@@ -363,6 +366,7 @@ async function startServer() {
             blueScore: 0,
             redScore: 0,
             winnerName: null,
+            zombieWave: 1,
             timeRemaining: 360,
             players: new Map(),
             vehicles: new Map(),
@@ -371,7 +375,8 @@ async function startServer() {
           rooms.set(roomId, room);
         }
 
-        const team: 'blue' | 'red' = msg.team === 'red' ? 'red' : 'blue';
+        const team: 'blue' | 'red' =
+          room.matchMode === 'zombies' ? 'blue' : msg.team === 'red' ? 'red' : 'blue';
         const isSmallInfantryMap =
           room.mapId === 'killhouse' || room.mapId === 'metro' || room.mapId === 'rooftop';
         const spawnZ =
@@ -433,6 +438,9 @@ async function startServer() {
         self.weaponId = String(msg.weaponId || self.weaponId);
         if (msg.gunGameTier !== undefined) {
           self.gunGameTier = Math.max(0, Number(msg.gunGameTier) || 0);
+        }
+        if (currentRoom.matchMode === 'zombies' && msg.zombieWave !== undefined) {
+          currentRoom.zombieWave = Math.max(currentRoom.zombieWave, Number(msg.zombieWave) || 1);
         }
         self.health = Number(msg.health ?? self.health);
         self.alive = msg.alive !== false;
@@ -538,6 +546,7 @@ async function startServer() {
       }
 
       if (msg.type === 'hit') {
+        if (currentRoom.matchMode === 'zombies') return;
         const targetId = String(msg.targetId || '');
         const dmg = Math.max(1, Math.min(300, Number(msg.damage) || 20));
         const target = currentRoom.players.get(targetId);
@@ -578,6 +587,12 @@ async function startServer() {
         if (currentRoom.matchMode === 'tdm') {
           if (msg.team === 'blue') currentRoom.blueScore += 1;
           else if (msg.team === 'red') currentRoom.redScore += 1;
+        } else if (currentRoom.matchMode === 'zombies') {
+          self.kills += 1;
+          currentRoom.blueScore += 1;
+          if (msg.zombieWave !== undefined) {
+            currentRoom.zombieWave = Math.max(currentRoom.zombieWave, Number(msg.zombieWave) || 1);
+          }
         } else {
           self.kills += 1;
           if (msg.gunGameTier !== undefined) {

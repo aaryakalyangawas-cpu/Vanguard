@@ -1118,8 +1118,151 @@ class SoundEngine {
       air.stop(now + 0.26);
     }
   }
+
+  public playZombieGroan(isBrute = false, volumeScale = 0.6) {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const dur = isBrute ? 0.82 : 0.55;
+    const baseFreq = isBrute ? 62 : 95 + Math.random() * 35;
+
+    const osc = ctx.createOscillator();
+    const sub = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+
+    osc.type = 'sawtooth';
+    sub.type = 'triangle';
+    osc.frequency.setValueAtTime(baseFreq, now);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.64, now + dur);
+    sub.frequency.setValueAtTime(baseFreq * 0.5, now);
+    sub.frequency.exponentialRampToValueAtTime(baseFreq * 0.34, now + dur);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(isBrute ? 260 : 420, now);
+    filter.frequency.linearRampToValueAtTime(isBrute ? 170 : 280, now + dur);
+    filter.Q.value = 3.2;
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime((isBrute ? 0.16 : 0.11) * volumeScale, now + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.002, now + dur);
+
+    osc.connect(filter);
+    sub.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    sub.start(now);
+    osc.stop(now + dur + 0.02);
+    sub.stop(now + dur + 0.02);
+
+    if (this.noiseBuffer) {
+      const rasp = ctx.createBufferSource();
+      rasp.buffer = this.noiseBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(isBrute ? 550 : 950, now);
+      bp.Q.value = 2.0;
+      const rGain = ctx.createGain();
+      rGain.gain.setValueAtTime(0.055 * volumeScale, now + 0.04);
+      rGain.gain.exponentialRampToValueAtTime(0.002, now + dur * 0.9);
+      rasp.connect(bp);
+      bp.connect(rGain);
+      rGain.connect(ctx.destination);
+      rasp.start(now);
+      rasp.stop(now + dur);
+    }
+  }
+
+  public playZombieHitPlayer() {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const thud = ctx.createOscillator();
+    const tGain = ctx.createGain();
+    thud.type = 'sawtooth';
+    thud.frequency.setValueAtTime(140, now);
+    thud.frequency.exponentialRampToValueAtTime(36, now + 0.18);
+    tGain.gain.setValueAtTime(0.24, now);
+    tGain.gain.exponentialRampToValueAtTime(0.004, now + 0.19);
+    thud.connect(tGain);
+    tGain.connect(ctx.destination);
+    thud.start(now);
+    thud.stop(now + 0.2);
+
+    if (this.noiseBuffer) {
+      const slash = ctx.createBufferSource();
+      slash.buffer = this.noiseBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(2400, now);
+      bp.frequency.exponentialRampToValueAtTime(640, now + 0.14);
+      const sGain = ctx.createGain();
+      sGain.gain.setValueAtTime(0.22, now);
+      sGain.gain.exponentialRampToValueAtTime(0.004, now + 0.15);
+      slash.connect(bp);
+      bp.connect(sGain);
+      sGain.connect(ctx.destination);
+      slash.start(now);
+      slash.stop(now + 0.16);
+    }
+  }
+
+  public playWaveStart(wave: number) {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const base = 110 + Math.min(8, wave) * 6;
+    const freqs = [base, base * 1.189, base * 1.498]; // minor triad ominous swell
+    for (const f of freqs) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(f, now);
+      osc.frequency.linearRampToValueAtTime(f * 0.96, now + 0.9);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(680, now);
+      gain.gain.setValueAtTime(0.002, now);
+      gain.gain.linearRampToValueAtTime(0.085, now + 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.003, now + 1.05);
+      osc.connect(lp);
+      lp.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 1.08);
+    }
+  }
+
+  public playWaveCleared() {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const notes: Array<[number, number]> = [
+      [0, 392],
+      [0.12, 493.88],
+      [0.24, 587.33],
+      [0.36, 783.99],
+    ];
+    for (const [offset, freq] of notes) {
+      const t = now + offset;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.11, t);
+      gain.gain.exponentialRampToValueAtTime(0.003, t + 0.24);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.25);
+    }
+  }
 }
 
 export const soundEngine = new SoundEngine();
+
 
 

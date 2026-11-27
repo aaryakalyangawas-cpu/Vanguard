@@ -9,6 +9,7 @@ interface ScoreboardModalProps {
   redScore: number;
   scoreLimit: number;
   matchMode?: MatchMode;
+  zombieWave?: number;
   onClose?: () => void;
 }
 
@@ -18,8 +19,10 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
   redScore,
   scoreLimit,
   matchMode = 'tdm',
+  zombieWave = 1,
   onClose,
 }) => {
+  const isZombies = matchMode === 'zombies';
   const isFfa = matchMode === 'ffa' || matchMode === 'gun_game';
   const isGunGame = matchMode === 'gun_game';
   const blueTeam = entries.filter((e) => e.team === 'blue');
@@ -87,14 +90,18 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
       <div className="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800">
         <div>
           <h2 className="font-display text-base sm:text-lg font-bold text-white">
-            {isGunGame
+            {isZombies
+              ? 'Zombie Survival Standings'
+              : isGunGame
               ? 'Gun Game Escalation Standings'
               : isFfa
               ? 'Free-For-All Combat Standings'
               : 'Team Deathmatch Standings'}
           </h2>
           <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
-            {isGunGame
+            {isZombies
+              ? 'Eliminate escalating infected waves · Co-op friendly fire disabled'
+              : isGunGame
               ? 'Eliminate foes with each weapon to unlock all 18 tiers'
               : isFfa
               ? `Every operator for themselves · First to ${scoreLimit} eliminations wins`
@@ -103,7 +110,18 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
         </div>
 
         <div className="flex items-center gap-3 sm:gap-5 font-mono tabular-nums">
-          {isFfa ? (
+          {isZombies ? (
+            <div className="flex items-center gap-4 text-right">
+              <div>
+                <div className="text-[10px] sm:text-[11px] text-lime-400 uppercase">Wave</div>
+                <div className="text-lg sm:text-2xl font-bold text-white">{zombieWave}</div>
+              </div>
+              <div>
+                <div className="text-[10px] sm:text-[11px] text-emerald-400 uppercase">Slain</div>
+                <div className="text-lg sm:text-2xl font-bold text-white">{blueScore}</div>
+              </div>
+            </div>
+          ) : isFfa ? (
             <div className="text-right">
               <div className="text-[10px] sm:text-[11px] text-amber-400 uppercase">Leader</div>
               <div className="text-sm sm:text-lg font-bold text-white">
@@ -136,16 +154,16 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
         </div>
       </div>
 
-      {isFfa ? (
+      {isFfa || isZombies ? (
         <div className="max-h-[58vh] overflow-y-auto touch-pan-y overflow-x-auto pr-1">
           <table className="w-full min-w-[420px] text-left border-collapse">
             <thead>
               <tr className="text-[11px] text-slate-400 border-b border-slate-800/80">
                 <th className="py-1.5 font-medium w-10">#</th>
-                <th className="py-1.5 font-medium">Combatant</th>
+                <th className="py-1.5 font-medium">{isZombies ? 'Survivor' : 'Combatant'}</th>
                 {isGunGame && <th className="py-1.5 font-medium w-20">Tier</th>}
                 <th className="py-1.5 font-medium">Weapon</th>
-                <th className="py-1.5 font-medium text-right w-14">Kills</th>
+                <th className="py-1.5 font-medium text-right w-20">{isZombies ? 'Slain' : 'Kills'}</th>
                 <th className="py-1.5 font-medium text-right w-14">Deaths</th>
                 <th className="py-1.5 font-medium text-right w-14">K/D</th>
               </tr>
@@ -169,10 +187,10 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
                     <td className="py-2 pr-2 truncate max-w-[160px]">
                       {row.name}
                       {row.isHuman && !row.isPlayer && (
-                        <span className="ml-1.5 text-[10px] font-mono text-sky-400">PLAYER</span>
+                        <span className="ml-1.5 text-[10px] font-mono text-sky-400">SURVIVOR</span>
                       )}
                       {!row.alive && (
-                        <span className="ml-1.5 text-[10px] font-normal text-slate-500">MIA</span>
+                        <span className="ml-1.5 text-[10px] font-normal text-red-400">DOWN</span>
                       )}
                     </td>
                     {isGunGame && (

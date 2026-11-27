@@ -502,7 +502,49 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
 
         {/* Center Mode-Aware Score Bar + Operator Identity */}
         <div className="flex flex-col items-center gap-1">
-          {hud.matchMode === 'gun_game' && hud.gunGame ? (
+          {hud.matchMode === 'zombies' && hud.zombies ? (
+            <div className="flex items-center gap-2.5 sm:gap-4 bg-[#0b0f17]/94 border border-lime-500/55 rounded-lg px-3 py-1 sm:px-4 sm:py-2 shadow-lg">
+              <div className="text-left">
+                <div className="text-[10px] font-mono text-lime-400 uppercase">Outbreak</div>
+                <div className="font-mono text-base sm:text-xl font-bold text-white tabular-nums">
+                  WAVE {hud.zombies.wave}
+                </div>
+              </div>
+              <div className="px-2 sm:px-3 border-x border-slate-700/80 text-center">
+                {hud.zombies.intermissionTimer > 0 ? (
+                  <>
+                    <div className="font-mono text-xs sm:text-sm font-bold text-emerald-300 tabular-nums">
+                      NEXT WAVE {Math.ceil(hud.zombies.intermissionTimer)}s
+                    </div>
+                    <div className="hidden sm:block text-[10px] text-slate-400 font-mono">
+                      Resupply at Arsenal [E]
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="font-mono text-xs sm:text-base font-bold text-red-300 tabular-nums">
+                      {hud.zombies.zombiesRemaining} Left
+                    </div>
+                    <div className="hidden sm:block text-[10px] text-slate-400 font-mono tabular-nums">
+                      {hud.zombies.brutesRemaining > 0
+                        ? `${hud.zombies.brutesRemaining} Brute${hud.zombies.brutesRemaining > 1 ? 's' : ''}`
+                        : `Slain ${hud.blueScore}`}
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] font-mono text-cyan-400 uppercase">Lives</div>
+                <div
+                  className={`font-mono text-base sm:text-xl font-bold tabular-nums ${
+                    hud.zombies.livesLeft <= 1 ? 'text-red-400' : 'text-white'
+                  }`}
+                >
+                  {hud.zombies.livesLeft}/{hud.zombies.maxLives}
+                </div>
+              </div>
+            </div>
+          ) : hud.matchMode === 'gun_game' && hud.gunGame ? (
             <div className="flex items-center gap-2.5 sm:gap-4 bg-[#0b0f17]/92 border border-amber-500/50 rounded-lg px-3 py-1 sm:px-4 sm:py-2 shadow-lg">
               <div className="text-left">
                 <div className="text-[10px] font-mono text-amber-400 uppercase">Tier {hud.gunGame.tier}/{hud.gunGame.totalTiers}</div>
@@ -635,15 +677,24 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
 
           <div className="w-40 sm:w-68 flex flex-col items-end gap-1">
             {hud.killFeed.slice(0, isTouch ? 3 : 5).map((item) => {
-              const isFfaMode = hud.matchMode !== 'tdm';
-              const killerCls = isFfaMode
+              const isZombies = hud.matchMode === 'zombies';
+              const isFfaMode = hud.matchMode === 'ffa' || hud.matchMode === 'gun_game';
+              const killerCls = isZombies
+                ? item.killerTeam === 'blue'
+                  ? 'text-sky-400 font-semibold'
+                  : 'text-lime-400 font-semibold'
+                : isFfaMode
                 ? item.killerName === hud.playerUsername
                   ? 'text-emerald-400 font-semibold'
                   : 'text-amber-300 font-semibold'
                 : item.killerTeam === 'blue'
                 ? 'text-blue-400 font-semibold'
                 : 'text-red-400 font-semibold';
-              const victimCls = isFfaMode
+              const victimCls = isZombies
+                ? item.victimTeam === 'blue'
+                  ? 'text-sky-400 font-semibold'
+                  : 'text-lime-400 font-semibold'
+                : isFfaMode
                 ? item.victimName === hud.playerUsername
                   ? 'text-emerald-400 font-semibold'
                   : 'text-slate-300 font-semibold'
@@ -785,9 +836,15 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
       {!hud.isAlive && (
         <div className="absolute inset-x-0 top-1/3 flex justify-center">
           <div className="px-6 py-4 rounded-lg bg-[#0b0f17]/92 border border-red-500/40 text-center shadow-xl">
-            <div className="font-display text-lg font-bold text-white">Eliminated</div>
+            <div className="font-display text-lg font-bold text-white">
+              {hud.matchMode === 'zombies' && hud.zombies && hud.zombies.livesLeft <= 0
+                ? 'Downed'
+                : 'Eliminated'}
+            </div>
             <div className="font-mono text-sm text-slate-300 mt-1 tabular-nums">
-              Redeploying in {hud.respawnTimer.toFixed(1)}s
+              {hud.matchMode === 'zombies' && hud.zombies && hud.zombies.livesLeft <= 0
+                ? 'Waiting for squad wave clear...'
+                : `Redeploying in ${hud.respawnTimer.toFixed(1)}s`}
             </div>
           </div>
         </div>
@@ -1331,6 +1388,7 @@ export const TacticalHud: React.FC<TacticalHudProps> = ({
               redScore={hud.redScore}
               scoreLimit={hud.scoreLimit}
               matchMode={hud.matchMode}
+              zombieWave={hud.zombies?.wave}
               onClose={isTouch ? onToggleScoreboard : undefined}
             />
           </div>

@@ -15,7 +15,7 @@ import {
   VehicleNode,
 } from './arena';
 import { soundEngine } from './audio';
-import { buildCombatantRig, CombatantRig } from './botModel';
+import { buildCombatantRig, buildZombieRig, CombatantRig } from './botModel';
 import {
   JoinedRoomInfo,
   MultiplayerClient,
@@ -56,6 +56,8 @@ import {
   TeamId,
   WeaponId,
   WeaponRuntimeState,
+  ZombieHudState,
+  ZombieVariant,
 } from './types';
 import { buildWeaponViewmodel, ViewmodelHandle, WEAPON_ORDER, WEAPONS } from './weapons';
 
@@ -274,6 +276,9 @@ interface CombatantActor {
   walkCycle: number;
   vehicleId?: string | null;
   vehicleSeat?: number | null;
+  isZombie?: boolean;
+  zombieVariant?: ZombieVariant;
+  groanTimer?: number;
 }
 
 export class FpsEngine {
@@ -333,6 +338,17 @@ export class FpsEngine {
   private dmgSeq = 1;
   private pickupNotice: string | null = null;
   private pickupNoticeTimer = 0;
+
+  // Zombie Survival state
+  private zombieWave = 1;
+  private zombieSpawnQueue: ZombieVariant[] = [];
+  private zombieSpawnTimer = 0;
+  private zombieIntermissionTimer = 0;
+  private zombieLivesLeft = 3;
+  private readonly zombieMaxLives = 3;
+  private totalZombieKills = 0;
+  private zombieSeq = 1;
+  private baseAtmosphere: ArenaData['atmosphere'] | null = null;
 
   // Player state
   private player!: CombatantActor;
@@ -720,6 +736,10 @@ export class FpsEngine {
     return this.config.matchMode === 'ffa' || this.config.matchMode === 'gun_game';
   }
 
+  private isZombieMode(): boolean {
+    return this.config.matchMode === 'zombies';
+  }
+
   private promoteGunGameActor(actor: CombatantActor): boolean {
     if (this.config.matchMode !== 'gun_game') return false;
     actor.gunGameTier += 1;
@@ -770,6 +790,7 @@ export class FpsEngine {
           this.resetVehicles();
           this.resetDestructibles();
         }
+        this.applySceneAtmosphere(this.isZombieMode());
         if (mapChanged || rulesChanged) {
           this.setupMatchActors();
         }
@@ -806,6 +827,9 @@ export class FpsEngine {
 
     this.blueScore = snap.blueScore;
     this.redScore = snap.redScore;
+    if (typeof snap.zombieWave === 'number' && snap.zombieWave > this.zombieWave && this.isZombieMode()) {
+      this.startZombieWave(snap.zombieWave);
+    }
     this.timeRemaining = snap.timeRemaining;
     this.mpHumanCount = snap.players.length;
     const isFfa = this.isFfaLike();
@@ -1025,6 +1049,14 @@ export class FpsEngine {
         }
         this.isCookingGrenade = false;
         this.arsenalOpen = false;
+        if (this.isZombieMode()) {
+          this.zombieLivesLeft = Math.max(0, this.zombieLivesLeft - 1);
+          if (this.zombieLivesLeft <= 0 && !this.actors.some((a) => a.isHuman && a.alive)) {
+            this.winner = 'red';
+            this.winnerName = 'Infected Horde';
+            this.endMatch();
+          }
+        }
       }
     }
 
@@ -1125,18 +1157,38 @@ export class FpsEngine {
 
     const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
     this.arena = createTacticalArena(this.scene, maxAniso, mapId);
+    this.baseAtmosphere = { ...this.arena.atmosphere };
+    this.applySceneAtmosphere(this.phase === 'playing' && this.isZombieMode());
+  }
 
-    const atm = this.arena.atmosphere;
-    (this.scene.background as THREE.Color).setHex(atm.bgColor);
-    this.scene.fog = new THREE.FogExp2(atm.fogColor, atm.fogDensity);
-    this.sunLight.color.setHex(atm.sunColor);
-    this.sunLight.intensity = atm.sunIntensity;
-    this.sunBaseOffset.set(...atm.sunPos);
-    this.sunLight.position.copy(this.sunBaseOffset);
-    this.sunLight.target.position.set(0, 0, 0);
-    this.hemiLight.color.setHex(atm.hemiSky);
-    this.hemiLight.groundColor.setHex(atm.hemiGround);
-    this.hemiLight.intensity = atm.hemiIntensity;
+  private applySceneAtmosphere(zombieOutbreak: boolean) {
+    const atm = this.baseAtmosphere || this.arena?.atmosphere;
+    if (!atm) return;
+    if (zombieOutbreak) {
+      const bgHex = 0x091016;
+      const fogHex = 0x0b171f;
+      (this.scene.background as THREE.Color).setHex(bgHex);
+      this.scene.fog = new THREE.FogExp2(fogHex, Math.max(0.0045, atm.fogDensity * 1.65));
+      this.sunLight.color.setHex(0x88b4d8);
+      this.sunLight.intensity = 1.05;
+      this.sunBaseOffset.set(...atm.sunPos);
+      this.sunLight.position.copy(this.sunBaseOffset);
+      this.sunLight.target.position.set(0, 0, 0);
+      this.hemiLight.color.setHex(0x4d748f);
+      this.hemiLight.groundColor.setHex(0x181f24);
+      this.hemiLight.intensity = 0.78;
+    } else {
+      (this.scene.background as THREE.Color).setHex(atm.bgColor);
+      this.scene.fog = new THREE.FogExp2(atm.fogColor, atm.fogDensity);
+      this.sunLight.color.setHex(atm.sunColor);
+      this.sunLight.intensity = atm.sunIntensity;
+      this.sunBaseOffset.set(...atm.sunPos);
+      this.sunLight.position.copy(this.sunBaseOffset);
+      this.sunLight.target.position.set(0, 0, 0);
+      this.hemiLight.color.setHex(atm.hemiSky);
+      this.hemiLight.groundColor.setHex(atm.hemiGround);
+      this.hemiLight.intensity = atm.hemiIntensity;
+    }
   }
 
   private createFreshWeaponStates(): Record<WeaponId, WeaponRuntimeState> {
@@ -1173,13 +1225,14 @@ export class FpsEngine {
     ];
 
     const isFfa = this.isFfaLike();
+    const isZombies = this.isZombieMode();
     const isGunGame = this.config.matchMode === 'gun_game';
     if (isGunGame) {
       const startW = GUN_GAME_LADDER[0];
       this.loadout = [startW, startW, startW];
     }
 
-    const playerTeam: TeamId = this.config.playerTeam || 'blue';
+    const playerTeam: TeamId = isZombies ? 'blue' : this.config.playerTeam || 'blue';
     const allSpawns = [...this.arena.blueSpawns, ...this.arena.redSpawns];
     const playerSpawns = isFfa ? allSpawns : playerTeam === 'blue' ? this.arena.blueSpawns : this.arena.redSpawns;
     const playerSpawn = playerSpawns[0];
@@ -1223,6 +1276,14 @@ export class FpsEngine {
       walkCycle: 0,
     };
     this.actors.push(this.player);
+
+    if (isZombies) {
+      if (this.phase === 'playing') {
+        this.startZombieWave(1);
+      }
+      this.selectSlot(0, true);
+      return;
+    }
 
     const shouldSpawnBots = this.config.mode === 'solo' || this.config.botFill;
     const teamSize = shouldSpawnBots
@@ -1452,6 +1513,12 @@ export class FpsEngine {
     this.killFeed = [];
     this.damageIndicators = [];
     this.pickupNotice = null;
+    this.zombieWave = 1;
+    this.zombieSpawnQueue = [];
+    this.zombieSpawnTimer = 0;
+    this.zombieIntermissionTimer = 0;
+    this.zombieLivesLeft = this.zombieMaxLives;
+    this.totalZombieKills = 0;
     this.stamina = 100;
     this.isReloading = false;
     this.reloadTimer = 0;
@@ -1488,8 +1555,12 @@ export class FpsEngine {
     this.streakBest = 0;
     this.uavActiveTimer = 0;
     this.airstrikeCharges = 1;
-    this.streakBanner = isGunGame ? `GUN GAME · TIER 1/${GUN_GAME_LADDER.length} (${WEAPONS[GUN_GAME_LADDER[0]].shortName})` : null;
-    this.streakBannerTimer = isGunGame ? 3.2 : 0;
+    this.streakBanner = isGunGame
+      ? `GUN GAME · TIER 1/${GUN_GAME_LADDER.length} (${WEAPONS[GUN_GAME_LADDER[0]].shortName})`
+      : this.isZombieMode()
+      ? 'OUTBREAK · WAVE 1 INCOMING — SURVIVE THE HORDE'
+      : null;
+    this.streakBannerTimer = isGunGame || this.isZombieMode() ? 3.5 : 0;
     this.lockCandidateId = null;
     this.lockCandidateName = null;
     this.lockProgress = 0;
@@ -1512,6 +1583,8 @@ export class FpsEngine {
       b.meshGroup.visible = true;
     }
 
+    this.phase = 'playing';
+    this.applySceneAtmosphere(this.isZombieMode());
     this.weaponStates = this.createFreshWeaponStates();
     this.setupMatchActors();
 
@@ -1524,7 +1597,7 @@ export class FpsEngine {
       this.mpClient.connectAndJoin({
         roomId: (this.config.roomId || 'alpha-1').trim(),
         username: this.player.name,
-        team: this.player.team,
+        team: this.isZombieMode() ? 'blue' : this.player.team,
         mapId: this.config.mapId,
         matchMode: this.config.matchMode,
         teamSize: this.config.teamSize,
@@ -1537,7 +1610,6 @@ export class FpsEngine {
       this.mpHumanCount = 1;
     }
 
-    this.phase = 'playing';
     this.weaponPivot.visible = true;
     this.requestPointerLock();
     this.emitHud();
@@ -1698,6 +1770,7 @@ export class FpsEngine {
     soundEngine.updateVehicleEngine(false, 0, false);
     soundEngine.updateHelicopterAudio(false, 0, false);
     this.mpClient.disconnect();
+    this.applySceneAtmosphere(false);
     this.clearDynamicEffects();
     this.resetMountedMgs();
     this.resetVehicles();
@@ -4472,6 +4545,10 @@ export class FpsEngine {
     weaponShort: string
   ): boolean {
     if (!victim.alive || victim.spawnShieldTimer > 0) return false;
+    if (victim.isZombie && attacker.isZombie) return false;
+    if (this.isZombieMode() && victim.isHuman && attacker.isHuman && victim.id !== attacker.id) {
+      return false;
+    }
 
     // Remote human damage is sent over network to that player
     if (victim.isHuman && !victim.isPlayer && attacker.isPlayer && this.config.mode === 'multiplayer') {
@@ -4532,6 +4609,9 @@ export class FpsEngine {
         }
         this.isCookingGrenade = false;
         this.arsenalOpen = false;
+        if (this.isZombieMode()) {
+          this.zombieLivesLeft = Math.max(0, this.zombieLivesLeft - 1);
+        }
       } else {
         for (const v of this.arena.vehicles) {
           for (let s = 0; s < v.seats.length; s++) {
@@ -4544,21 +4624,44 @@ export class FpsEngine {
 
       let wonGunGame = false;
       if (victim.id !== attacker.id) {
-        attacker.kills += 1;
+        if (!attacker.isZombie) {
+          attacker.kills += 1;
+        }
         if (attacker.isPlayer) {
           this.registerPlayerKillStreak();
         }
-        if (!this.isFfaLike()) {
+        if (this.isZombieMode()) {
+          if (victim.isZombie) {
+            this.blueScore += 1;
+            this.totalZombieKills += 1;
+            if (victim.zombieVariant === 'brute' || this.totalZombieKills % 8 === 0) {
+              const healAmt = victim.zombieVariant === 'brute' ? 30 : 20;
+              if (this.player && this.player.alive) {
+                this.player.health = Math.min(this.player.maxHealth, this.player.health + healAmt);
+                const curSt = this.weaponStates[this.activeWeapon];
+                const curSpec = WEAPONS[this.activeWeapon];
+                if (curSt && curSpec) {
+                  curSt.reserve = Math.min(curSpec.reserveMax, curSt.reserve + curSpec.magSize);
+                }
+              }
+              this.pickupNotice =
+                victim.zombieVariant === 'brute'
+                  ? 'Brute Slain! +30 HP & Magazine Drop'
+                  : 'Horde Surge Bonus · +20 HP & Ammo';
+              this.pickupNoticeTimer = 2.4;
+            }
+          }
+        } else if (!this.isFfaLike()) {
           if (attacker.team === 'blue') this.blueScore += 1;
           else this.redScore += 1;
         }
         wonGunGame = this.promoteGunGameActor(attacker);
         if (this.config.mode === 'multiplayer' && !victim.isHuman && attacker.isPlayer) {
-          this.mpClient.sendBotKill(attacker.team, attacker.gunGameTier);
+          this.mpClient.sendBotKill(attacker.team, attacker.gunGameTier, this.zombieWave);
         }
       }
 
-      if (!this.isFfaLike()) {
+      if (!this.isFfaLike() && !this.isZombieMode()) {
         for (const [otherId, ts] of Object.entries(victim.lastDamagedBy)) {
           if (otherId !== attacker.id && now - ts < 5500) {
             const assister = this.actors.find((a) => a.id === otherId);
@@ -4581,7 +4684,17 @@ export class FpsEngine {
       });
       if (this.killFeed.length > 5) this.killFeed.pop();
 
-      if (wonGunGame || (this.config.matchMode === 'ffa' && attacker.kills >= this.config.scoreLimit)) {
+      if (this.isZombieMode()) {
+        if (
+          victim.isPlayer &&
+          this.zombieLivesLeft <= 0 &&
+          (this.config.mode === 'solo' || !this.actors.some((a) => a.isHuman && a.alive))
+        ) {
+          this.winner = 'red';
+          this.winnerName = 'Infected Horde';
+          this.endMatch();
+        }
+      } else if (wonGunGame || (this.config.matchMode === 'ffa' && attacker.kills >= this.config.scoreLimit)) {
         this.winnerName = attacker.name;
         this.endMatch();
       } else if (
@@ -4642,7 +4755,18 @@ export class FpsEngine {
       document.exitPointerLock();
     }
 
-    if (this.isFfaLike()) {
+    if (this.isZombieMode()) {
+      const lostAllLives = this.zombieLivesLeft <= 0 && !this.actors.some((a) => a.isHuman && a.alive);
+      if (lostAllLives || this.winnerName === 'Infected Horde') {
+        this.winner = 'red';
+        this.winnerName = 'Infected Horde';
+        soundEngine.playMatchEnd(false);
+      } else {
+        this.winner = 'blue';
+        this.winnerName = this.player?.name || 'Survivors';
+        soundEngine.playMatchEnd(true);
+      }
+    } else if (this.isFfaLike()) {
       const sorted = [...this.actors].sort(
         (a, b) => b.gunGameTier - a.gunGameTier || b.kills - a.kills || a.deaths - b.deaths
       );
@@ -5166,9 +5290,11 @@ export class FpsEngine {
     if (!p.alive) {
       soundEngine.updateVehicleEngine(false, 0, false);
       soundEngine.updateHelicopterAudio(false, 0, false);
-      p.respawnTimer -= dt;
-      if (p.respawnTimer <= 0) {
-        this.respawnActor(p);
+      if (!this.isZombieMode() || this.zombieLivesLeft > 0) {
+        p.respawnTimer -= dt;
+        if (p.respawnTimer <= 0) {
+          this.respawnActor(p);
+        }
       }
       this.camera.position.set(p.position.x, p.position.y + 1.9, p.position.z);
       this.camera.rotation.set(-0.35, p.yaw, 0, 'YXZ');
@@ -6156,7 +6282,294 @@ export class FpsEngine {
     return { reaction: 0.25, spreadMult: 1.45, speed: 6.2, fireRateMult: 0.82 };
   }
 
+  private startZombieWave(wave: number) {
+    this.zombieWave = wave;
+    this.zombieIntermissionTimer = 0;
+    this.zombieSpawnTimer = 0.6;
+    const diffBonus = this.config.difficulty === 'veteran' ? 4 : this.config.difficulty === 'recruit' ? -2 : 0;
+    const totalCount = Math.max(6, 6 + wave * 4 + diffBonus);
+    const queue: ZombieVariant[] = [];
+    for (let i = 0; i < totalCount; i++) {
+      if (wave >= 2 && (i + 1) % 6 === 0) {
+        queue.push('brute');
+      } else if (wave >= 2 && i % 3 === 1) {
+        queue.push('runner');
+      } else if (wave === 1 && i === totalCount - 1) {
+        queue.push('runner');
+      } else {
+        queue.push('walker');
+      }
+    }
+    this.zombieSpawnQueue = queue;
+    soundEngine.playWaveStart(wave);
+    this.streakBanner = `WAVE ${wave} · ${totalCount} INFECTED APPROACHING`;
+    this.streakBannerTimer = 3.2;
+  }
+
+  private spawnSingleZombie(variant: ZombieVariant) {
+    const id = `zombie-${this.zombieSeq++}`;
+    const spawns = [...this.arena.redSpawns, ...this.arena.blueSpawns.slice(1)];
+    const pool = spawns.length > 0 ? spawns : this.arena.redSpawns;
+    let spawn = pool[Math.floor(Math.random() * pool.length)].clone();
+    if (this.player) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const cand = pool[Math.floor(Math.random() * pool.length)];
+        if (cand.distanceTo(this.player.position) > 18) {
+          spawn = cand.clone();
+          break;
+        }
+      }
+    }
+    spawn.x += (Math.random() - 0.5) * 4.5;
+    spawn.z += (Math.random() - 0.5) * 4.5;
+    spawn.y = groundHeightAt(spawn.x, spawn.z, spawn.y + 0.5, this.arena);
+
+    const waveHpScale = 1 + (this.zombieWave - 1) * 0.14;
+    const diffHpScale = this.config.difficulty === 'veteran' ? 1.2 : this.config.difficulty === 'recruit' ? 0.8 : 1.0;
+    const baseHp = variant === 'brute' ? 320 : variant === 'runner' ? 85 : 130;
+    const maxHp = Math.round(baseHp * waveHpScale * diffHpScale);
+    const label = variant === 'brute' ? 'Armored Brute' : variant === 'runner' ? 'Feral Runner' : 'Infected Walker';
+    const rig = buildZombieRig(id, variant);
+    rig.root.position.copy(spawn);
+    this.scene.add(rig.root);
+
+    this.actors.push({
+      id,
+      name: label,
+      team: 'red',
+      isPlayer: false,
+      isHuman: false,
+      isZombie: true,
+      zombieVariant: variant,
+      groanTimer: 2 + Math.random() * 5,
+      weaponId: 'glock19',
+      position: spawn,
+      velocity: new THREE.Vector3(),
+      yaw: 0,
+      pitch: 0,
+      health: maxHp,
+      maxHealth: maxHp,
+      alive: true,
+      respawnTimer: 0,
+      spawnShieldTimer: 0.25,
+      kills: 0,
+      deaths: 0,
+      assists: 0,
+      gunGameTier: 0,
+      lastDamagedBy: {},
+      rig,
+      waypointIdx: 0,
+      strafeDir: Math.random() > 0.5 ? 1 : -1,
+      strafeTimer: 0,
+      fireCooldown: 0.4,
+      grenadeCooldown: 999,
+      reactionTimer: 0,
+      losTimer: 0,
+      targetEnemyId: null,
+      deathAnimTimer: 0,
+      walkCycle: Math.random() * 6,
+    });
+  }
+
+  private updateZombieSpawner(dt: number) {
+    if (!this.isZombieMode() || this.phase !== 'playing') return;
+
+    // Remove finished dead zombies cleanly
+    for (let i = this.actors.length - 1; i >= 0; i--) {
+      const a = this.actors[i];
+      if (a.isZombie && !a.alive && a.respawnTimer <= 0) {
+        if (a.rig) this.scene.remove(a.rig.root);
+        this.actors.splice(i, 1);
+      }
+    }
+
+    if (this.zombieIntermissionTimer > 0) {
+      this.zombieIntermissionTimer = Math.max(0, this.zombieIntermissionTimer - dt);
+      if (this.zombieIntermissionTimer <= 0) {
+        this.startZombieWave(this.zombieWave + 1);
+      }
+      return;
+    }
+
+    const activeZombies = this.actors.filter((a) => a.isZombie && a.alive).length;
+    const cap = Math.min(20, 12 + Math.floor(this.zombieWave * 1.5));
+
+    if (this.zombieSpawnQueue.length > 0 && activeZombies < cap) {
+      this.zombieSpawnTimer -= dt;
+      if (this.zombieSpawnTimer <= 0) {
+        const nextVar = this.zombieSpawnQueue.shift()!;
+        this.spawnSingleZombie(nextVar);
+        this.zombieSpawnTimer = Math.max(0.28, 0.9 - this.zombieWave * 0.05);
+      }
+    } else if (this.zombieSpawnQueue.length === 0 && activeZombies === 0) {
+      // Wave cleared!
+      this.zombieIntermissionTimer = 5.0;
+      soundEngine.playWaveCleared();
+      if (this.player) {
+        if (!this.player.alive && this.zombieLivesLeft === 0) {
+          this.zombieLivesLeft = 1;
+          this.respawnActor(this.player);
+        } else if (this.player.alive) {
+          this.player.health = Math.min(this.player.maxHealth, this.player.health + 35);
+        }
+        this.grenades = Math.min(this.maxGrenades, this.grenades + 1);
+        for (const wid of this.loadout) {
+          const sp = WEAPONS[wid];
+          const st = this.weaponStates[wid];
+          if (sp && st) {
+            st.reserve = Math.min(sp.reserveMax, st.reserve + Math.ceil(sp.magSize * 1.5));
+          }
+        }
+      }
+      this.streakBanner = `WAVE ${this.zombieWave} CLEARED · +35 HP & +1 FRAG · RESUPPLY AT ARSENAL [E]`;
+      this.streakBannerTimer = 4.6;
+    }
+  }
+
+  private updateZombieActor(bot: CombatantActor, dt: number) {
+    const botRig = bot.rig;
+    if (!botRig) return;
+
+    const variant = bot.zombieVariant || 'walker';
+    const isRunner = variant === 'runner';
+    const isBrute = variant === 'brute';
+
+    if (bot.fireCooldown > 0) bot.fireCooldown -= dt;
+    if (bot.strafeTimer > 0) bot.strafeTimer -= dt;
+
+    // Periodic eerie spatialized zombie groan
+    bot.groanTimer = (bot.groanTimer ?? 4) - dt;
+    if (bot.groanTimer <= 0) {
+      bot.groanTimer = isBrute ? 4.5 + Math.random() * 4 : 5.5 + Math.random() * 6;
+      const distP = this.player ? bot.position.distanceTo(this.player.position) : 99;
+      if (distP < 38) {
+        soundEngine.playZombieGroan(isBrute, THREE.MathUtils.clamp(1 - distP / 38, 0.08, 0.55));
+      }
+    }
+
+    // Acquire nearest living human survivor
+    let target: CombatantActor | null = null;
+    let bestDist = Infinity;
+    for (const other of this.actors) {
+      if (!other.alive || other.isZombie || !other.isHuman) continue;
+      const d = bot.position.distanceTo(other.position);
+      if (d < bestDist) {
+        bestDist = d;
+        target = other;
+      }
+    }
+
+    const waveSpeedMult = Math.min(1.38, 1 + (this.zombieWave - 1) * 0.045);
+    const diffSpeedMult = this.config.difficulty === 'veteran' ? 1.12 : this.config.difficulty === 'recruit' ? 0.85 : 1.0;
+    const baseSpeed = isRunner ? 6.9 : isBrute ? 3.55 : 4.45;
+    const moveSpeed = baseSpeed * waveSpeedMult * diffSpeedMult;
+
+    let moveDirX = 0;
+    let moveDirZ = 0;
+    if (target) {
+      const dx = target.position.x - bot.position.x;
+      const dz = target.position.z - bot.position.z;
+      const len = Math.max(0.01, Math.hypot(dx, dz));
+      moveDirX = dx / len;
+      moveDirZ = dz / len;
+
+      // Subtle shambling sway or wall-bypass sidestep if recently blocked
+      if (bot.strafeTimer > 0) {
+        const rightX = -moveDirZ;
+        const rightZ = moveDirX;
+        moveDirX = moveDirX * 0.45 + rightX * bot.strafeDir * 0.9;
+        moveDirZ = moveDirZ * 0.45 + rightZ * bot.strafeDir * 0.9;
+      } else if (!isRunner) {
+        const wobble = Math.sin(bot.walkCycle * 0.85) * 0.16;
+        const rightX = -moveDirZ;
+        const rightZ = moveDirX;
+        moveDirX += rightX * wobble;
+        moveDirZ += rightZ * wobble;
+      }
+
+      const desiredYaw = Math.atan2(dx, dz);
+      let deltaYaw = desiredYaw - bot.yaw;
+      while (deltaYaw > Math.PI) deltaYaw -= Math.PI * 2;
+      while (deltaYaw < -Math.PI) deltaYaw += Math.PI * 2;
+      bot.yaw += deltaYaw * Math.min(1, dt * 8.5);
+    }
+
+    // Horde separation so zombies swarm nicely instead of stacking
+    for (const other of this.actors) {
+      if (other.id === bot.id || !other.alive || !other.isZombie) continue;
+      const sepX = bot.position.x - other.position.x;
+      const sepZ = bot.position.z - other.position.z;
+      const distSq = sepX * sepX + sepZ * sepZ;
+      const minSep = isBrute ? 2.4 : 1.7;
+      if (distSq > 0.001 && distSq < minSep) {
+        const d = Math.sqrt(distSq);
+        moveDirX += (sepX / d) * (1.2 - d) * 1.4;
+        moveDirZ += (sepZ / d) * (1.2 - d) * 1.4;
+      }
+    }
+
+    const moveLen = Math.hypot(moveDirX, moveDirZ);
+    if (moveLen > 0.01) {
+      moveDirX /= moveLen;
+      moveDirZ /= moveLen;
+    }
+
+    const prevX = bot.position.x;
+    const prevZ = bot.position.z;
+    const meleeReach = isBrute ? 2.65 : 2.05;
+    if (bestDist > meleeReach * 0.72) {
+      bot.position.x += moveDirX * moveSpeed * dt;
+      bot.position.z += moveDirZ * moveSpeed * dt;
+      resolveHorizontalCollision(bot.position, isBrute ? 0.65 : 0.48, 1.8, this.arena);
+    }
+
+    const movedDist = Math.hypot(bot.position.x - prevX, bot.position.z - prevZ);
+    if (bestDist > meleeReach && movedDist < moveSpeed * dt * 0.2 && bot.strafeTimer <= 0) {
+      bot.strafeDir = Math.random() > 0.5 ? 1 : -1;
+      bot.strafeTimer = 0.85;
+    }
+
+    const targetGround = groundHeightAt(bot.position.x, bot.position.z, bot.position.y + 0.3, this.arena);
+    bot.position.y = THREE.MathUtils.damp(bot.position.y, targetGround, 14, dt);
+
+    botRig.root.position.copy(bot.position);
+    botRig.root.rotation.y = bot.yaw;
+
+    const actualSpeed = movedDist / Math.max(0.001, dt);
+    if (actualSpeed > 0.3) {
+      bot.walkCycle += dt * actualSpeed * (isRunner ? 1.8 : 1.45);
+      const swing = Math.sin(bot.walkCycle) * (isRunner ? 0.68 : 0.52);
+      botRig.leftLeg.rotation.x = swing;
+      botRig.rightLeg.rotation.x = -swing;
+    }
+
+    // Outstretched zombie arms & swipe lunge animation
+    const lunge = bot.fireCooldown > 0.35 ? Math.sin(((bot.fireCooldown - 0.35) / 0.5) * Math.PI) * 0.65 : 0;
+    const armSway = Math.sin(bot.walkCycle * 1.1) * 0.16;
+    botRig.rightArm.rotation.x = -0.15 + armSway - lunge;
+    if (botRig.leftArm) {
+      botRig.leftArm.rotation.x = -0.15 - armSway - lunge;
+    }
+
+    // Melee Claw / Slam Attack
+    if (target && bestDist <= meleeReach && Math.abs(target.position.y - bot.position.y) < 2.4 && bot.fireCooldown <= 0) {
+      bot.fireCooldown = isBrute ? 1.15 : isRunner ? 0.72 : 0.95;
+      const baseDmg = isBrute ? 38 : isRunner ? 18 : 24;
+      const weaponLabel = isBrute ? 'Brute Slam' : isRunner ? 'Feral Claws' : 'Infected Bite';
+      if (target.isPlayer && this.activeVehicle && !this.activeVehicle.destroyed) {
+        this.damageVehicle(this.activeVehicle, Math.round(baseDmg * 0.75), bot);
+        soundEngine.playZombieHitPlayer();
+      } else {
+        const hit = this.applyDamage(target, bot, baseDmg, false, weaponLabel);
+        if (target.isPlayer && (hit || target.alive)) {
+          soundEngine.playZombieHitPlayer();
+        }
+      }
+    }
+  }
+
   private updateRemoteHumansAndBots(dt: number) {
+    this.updateZombieSpawner(dt);
     const diffParams = this.getDifficultyParams(this.config.difficulty);
 
     for (const actor of this.actors) {
@@ -6214,9 +6627,14 @@ export class FpsEngine {
         if (bot.deathAnimTimer >= 1 && bot.respawnTimer < 2.2) {
           botRig.root.visible = false;
         }
-        if (bot.respawnTimer <= 0) {
+        if (bot.respawnTimer <= 0 && !bot.isZombie) {
           this.respawnActor(bot);
         }
+        continue;
+      }
+
+      if (bot.isZombie) {
+        this.updateZombieActor(bot, dt);
         continue;
       }
 
@@ -7623,7 +8041,7 @@ export class FpsEngine {
       this.updatePickups(dt);
       this.updateEffects(dt);
     } else if (this.phase === 'playing') {
-      if (this.config.mode === 'solo') {
+      if (this.config.mode === 'solo' && !this.isZombieMode()) {
         this.timeRemaining = Math.max(0, this.timeRemaining - dt);
         if (this.timeRemaining <= 0) {
           this.endMatch();
@@ -7670,6 +8088,7 @@ export class FpsEngine {
               health: this.player.health,
               alive: this.player.alive,
               gunGameTier: this.player.gunGameTier,
+              zombieWave: this.isZombieMode() ? this.zombieWave : undefined,
               vehicleId: this.activeVehicle ? this.activeVehicle.id : null,
               vehicleSeat: this.activeVehicle ? this.activeVehicleSeat : null,
               turretId: this.activeMountedMg ? this.activeMountedMg.id : null,
@@ -7744,18 +8163,21 @@ export class FpsEngine {
 
     const radarBlips: RadarBlip[] = [];
     const isFfa = this.isFfaLike();
+    const isZombies = this.isZombieMode();
     for (const actor of this.actors) {
       if (actor.isPlayer || !actor.alive) continue;
-      // Enemies show within 82m OR anytime UAV Recon is active
       const d = this.player ? actor.position.distanceTo(this.player.position) : 0;
-      const isEnemyBlip = isFfa || actor.team !== this.player?.team;
-      if (isEnemyBlip && this.uavActiveTimer <= 0 && d > 82) {
+      const isEnemyBlip = actor.isZombie || isFfa || actor.team !== this.player?.team;
+      if (isEnemyBlip && !actor.isZombie && this.uavActiveTimer <= 0 && d > 82) {
+        continue;
+      }
+      if (actor.isZombie && this.uavActiveTimer <= 0 && d > 110) {
         continue;
       }
       radarBlips.push({
         x: actor.position.x,
         z: actor.position.z,
-        team: isFfa ? 'red' : actor.team,
+        team: actor.isZombie ? 'zombie' : isFfa ? 'red' : actor.team,
         alive: actor.alive,
       });
     }
@@ -7833,6 +8255,7 @@ export class FpsEngine {
     }
 
     const scoreboard: ScoreboardEntry[] = this.actors
+      .filter((a) => !a.isZombie)
       .map((a) => ({
         id: a.id,
         name: a.name,
@@ -7950,6 +8373,22 @@ export class FpsEngine {
           }
         : null;
 
+    const aliveZombies = isZombies ? this.actors.filter((a) => a.isZombie && a.alive) : [];
+    const zombieHud: ZombieHudState | null = isZombies
+      ? {
+          wave: this.zombieWave,
+          zombiesAlive: aliveZombies.length,
+          zombiesRemaining: aliveZombies.length + this.zombieSpawnQueue.length,
+          intermissionTimer: this.zombieIntermissionTimer,
+          livesLeft: this.zombieLivesLeft,
+          maxLives: this.zombieMaxLives,
+          totalZombieKills: this.totalZombieKills,
+          brutesRemaining:
+            aliveZombies.filter((z) => z.zombieVariant === 'brute').length +
+            this.zombieSpawnQueue.filter((v) => v === 'brute').length,
+        }
+      : null;
+
     this.onHudUpdate({
       phase: this.phase,
       playerUsername: this.player?.name || this.config.username || 'Vanguard-1',
@@ -7965,6 +8404,7 @@ export class FpsEngine {
       scoreLimit: this.config.scoreLimit,
       timeRemaining: this.timeRemaining,
       gunGame: gunGameHud,
+      zombies: zombieHud,
       winnerName: this.winnerName,
       health: this.player?.health ?? 100,
       maxHealth: this.player?.maxHealth ?? 100,

@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccountModal } from './components/AccountModal';
+import { AndroidInstallModal, OfflineIndicator } from './components/AndroidInstallModal';
 import { ArsenalModal } from './components/ArsenalModal';
 import { GameMenus } from './components/GameMenus';
 import { MobileControls } from './components/MobileControls';
@@ -13,6 +14,7 @@ import { FpsEngine } from './game/FpsEngine';
 import { MAPS } from './game/arena';
 import { HudSnapshot, MatchConfig, PlayerAccount, WeaponId } from './game/types';
 import { WEAPONS } from './game/weapons';
+import { useOnlineStatus, usePWAInstall } from './hooks/usePWAInstall';
 
 const CONFIG_STORAGE_KEY = 'vanguard_arena_config_v3';
 const ACCOUNT_STORAGE_KEY = 'vanguard_arena_account_v1';
@@ -48,7 +50,12 @@ function loadInitialConfig(): MatchConfig {
     if (!WEAPONS[merged.startingSecondary]) merged.startingSecondary = 'deagle50';
     if (!WEAPONS[merged.startingHeavy]) merged.startingHeavy = 'fgm148_javelin';
     if (!MAPS[merged.mapId]) merged.mapId = 'yard';
-    if (merged.matchMode !== 'tdm' && merged.matchMode !== 'ffa' && merged.matchMode !== 'gun_game') {
+    if (
+      merged.matchMode !== 'tdm' &&
+      merged.matchMode !== 'ffa' &&
+      merged.matchMode !== 'gun_game' &&
+      merged.matchMode !== 'zombies'
+    ) {
       merged.matchMode = 'tdm';
     }
     if (
@@ -103,6 +110,10 @@ export default function App() {
 
   const [account, setAccount] = useState<PlayerAccount | null>(loadInitialAccount);
   const [showAccountModal, setShowAccountModal] = useState<boolean>(() => !loadInitialAccount());
+  const [showAndroidModal, setShowAndroidModal] = useState(false);
+
+  const { isInstallable, isInstalled, promptInstall } = usePWAInstall();
+  const isOnline = useOnlineStatus();
 
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [showScoreboard, setShowScoreboard] = useState(false);
@@ -228,6 +239,7 @@ export default function App() {
   const handleStartMatch = useCallback(() => {
     setShowScoreboard(false);
     setShowAccountModal(false);
+    setShowAndroidModal(false);
     setInspecting3D(false);
     engineRef.current?.startNewMatch(configRef.current);
   }, []);
@@ -419,6 +431,8 @@ export default function App() {
           onLobbyZoom={(delta) => engineRef.current?.setLobbyCameraZoom(delta)}
           onLobbyPreset={(preset) => engineRef.current?.setLobbyCameraPreset(preset)}
           onOpenAccount={() => setShowAccountModal(true)}
+          onOpenAndroidApp={() => setShowAndroidModal(true)}
+          isAppInstalled={isInstalled}
           onUpdateConfig={handleUpdateConfig}
           onStartMatch={handleStartMatch}
           onResumeMatch={handleResumeMatch}
@@ -434,6 +448,17 @@ export default function App() {
           onClose={() => setShowAccountModal(false)}
         />
       )}
+
+      {showAndroidModal && (!hud || hud.phase === 'lobby') && (
+        <AndroidInstallModal
+          isInstallable={isInstallable}
+          isInstalled={isInstalled}
+          onPromptInstall={promptInstall}
+          onClose={() => setShowAndroidModal(false)}
+        />
+      )}
+
+      <OfflineIndicator isOnline={isOnline} />
     </div>
   );
 }
